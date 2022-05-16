@@ -43,6 +43,21 @@ function ToolboxCanvas(props: PropsWithChildren<ToolboxCanvasProps>) {
       return (
         <path d={pathCmds} stroke='black' strokeWidth={1} fill='none' />
       )
+
+    case ToolType.Selector:
+      const hovered = hoveredObjects(props.state.canvas.objects, {
+        x: props.mouseX,
+        y: props.mouseY,
+      });
+      if (hovered) {
+        const pathCmds = pathCommandsFromObject(hovered);
+        return (
+          <path d={pathCmds} stroke='yellow' strokeWidth={1} fill='none' />
+        )
+      }
+
+      return null;
+
     default:
       return null;
   }
@@ -68,13 +83,24 @@ function DataCanvas(props: PropsWithChildren<DataCanvasProps>) {
   );
 }
 
-interface Point {
+interface Vec2D {
   x: number;
   y: number;
 }
 
+function vecSub(a: Vec2D, b: Vec2D): Vec2D {
+  return {
+    x: a.x - b.x,
+    y: a.y - b.y,
+  }
+}
+
+function vecDot(a: Vec2D, b: Vec2D): number {
+  return a.x * b.x + a.y * b.y;
+}
+
 type Node = {
-  point: Point;
+  point: Vec2D;
   leftControlPoint: number | null;
   rightControlPoint: number | null;
 }
@@ -92,7 +118,60 @@ type Object = {
   type: ObjectType.Circle;
   id: number,
   radius: number;
-  centre: Point;
+  centre: Vec2D;
+}
+
+function hitLineSegment(a: Node, b: Node, tol: number, mouse: Vec2D): boolean {
+  const mouseFromA = vecSub(mouse, a.point);
+  const bFromA = vecSub(b.point, a.point);
+  const proj = vecDot(mouseFromA, bFromA);
+  const normSq = vecDot(bFromA, bFromA);
+  if (normSq < 1e-2) {
+    return false;
+  }
+
+  if (proj <= 0 && proj * proj / normSq >= tol * tol) {
+    return false;
+  }
+
+  // Equivalent to if (proj / norm(b - a) >= norm(b - a) + tol)
+  const tmp1 = proj - normSq;
+  if (tmp1 >= 0 && tmp1 * tmp1 / normSq >= tol * tol) {
+    return false;
+  }
+
+  const mouseFromANormSq = vecDot(mouseFromA, mouseFromA);
+  const prepDistSq = mouseFromANormSq - proj * proj / normSq;
+  if (prepDistSq > tol * tol) {
+    return false;
+  }
+
+  return true;
+}
+
+function hoveredObjects(objects: Object[], mouse: Vec2D): Object | undefined {
+  for (const object of objects) {
+    switch (object.type) {
+    case ObjectType.Path:
+      for (let i = 1; i < object.nodes.length; ++i) {
+        const a = object.nodes[i - 1];
+        const b = object.nodes[i];
+        if (hitLineSegment(a, b, 10, mouse)) {
+          // FIXME: always take the first one for now, probably not correct
+          return {
+            type: ObjectType.Path,
+            id: -1,
+            nodes: [a, b],
+          }
+        }
+      }
+
+      break;
+    case ObjectType.Circle:
+      break;
+    }
+  }
+  return undefined;
 }
 
 interface PenToolState {
@@ -121,7 +200,7 @@ const initialControllerState = {
   commands: [],
 }
 
-function samePoint(a: Point, b: Point): boolean {
+function samePoint(a: Vec2D, b: Vec2D): boolean {
   return a.x === b.x && a.y === b.y;
 }
 
@@ -130,7 +209,7 @@ type CommandAction =
 
 type ControllerAction =
   { type: 'selectTool', toolType: ToolType } |
-  { type: 'addTemporaryNode', point: Point } |
+  { type: 'addTemporaryNode', point: Vec2D } |
   CommandAction
 
 function controllerReducer(state: ControllerState, action: ControllerAction): ControllerState {
@@ -221,8 +300,8 @@ function controllerReducer(state: ControllerState, action: ControllerAction): Co
 }
 
 type ToolInput =
-  { type: 'mouseDown', point: Point } |
-  { type: 'doubleClick', point: Point }
+  { type: 'mouseDown', point: Vec2D } |
+  { type: 'doubleClick', point: Vec2D }
 
 function runTool(state: ControllerState, dispatch: React.Dispatch<ControllerAction>, input: ToolInput) {
   switch (state.currentToolType) {
