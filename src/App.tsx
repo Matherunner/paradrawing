@@ -365,6 +365,24 @@ function Toolbar(props: PropsWithChildren<ToolbarProps>) {
   );
 }
 
+interface CommandListProps {
+  state: ControllerState;
+}
+
+function CommandList(props: PropsWithChildren<CommandListProps>) {
+  const items = [];
+
+  for (const cmd of props.state.commands) {
+    items.push(<li key={cmd.object.id}><span>{cmd.type}</span></li>);
+  }
+
+  return (
+    <ul>
+      {items}
+    </ul>
+  )
+}
+
 interface CanvasProps {
   style?: CSSProperties;
 }
@@ -467,26 +485,32 @@ function Canvas(props: PropsWithChildren<CanvasProps>) {
   return (
     <div style={{ ...props.style, flexDirection: 'column', display: 'flex' }}>
       <Toolbar state={state} />
-      <div ref={containerRef} style={{ flex: 1 }}>
-        <svg
-          onMouseDown={onMouseDown}
-          onMouseUp={onMouseUp}
-          onMouseMove={onMouseMove}
-          onDoubleClick={onDoubleClick}
-          width="100%"
-          height="100%"
-          preserveAspectRatio='none'
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <DataCanvas
-            state={state}
-          />
-          <ToolboxCanvas
-            state={state}
-            mouseX={mousePoint.x}
-            mouseY={mousePoint.y}
-          />
-        </svg>
+      <div style={{ flex: 1, flexDirection: 'row', display: 'flex' }}>
+        <div style={{ width: 300, backgroundColor: 'lightblue' }}>
+          <CommandList state={state} />
+        </div>
+        <div ref={containerRef} style={{ flex: 1 }}>
+          <svg
+            style={{ flex: 1 }}
+            onMouseDown={onMouseDown}
+            onMouseUp={onMouseUp}
+            onMouseMove={onMouseMove}
+            onDoubleClick={onDoubleClick}
+            width="100%"
+            height="100%"
+            preserveAspectRatio='none'
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <DataCanvas
+              state={state}
+            />
+            <ToolboxCanvas
+              state={state}
+              mouseX={mousePoint.x}
+              mouseY={mousePoint.y}
+            />
+          </svg>
+        </div>
       </div>
     </div>
   );
