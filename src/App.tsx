@@ -1,5 +1,6 @@
 import React, { CSSProperties, PropsWithChildren } from 'react';
 import styles from './App.module.css';
+import { Drawing, EventKind, StateChangeListener } from './canvas';
 
 const enum ToolType {
   Selector,
@@ -383,6 +384,74 @@ function CommandList(props: PropsWithChildren<CommandListProps>) {
   )
 }
 
+function DrawingWrapper() {
+  const [, setChangeCounter] = React.useState(0);
+
+  const objRef = React.useRef<Drawing>();
+  if (!objRef.current) {
+    objRef.current = new Drawing();
+  }
+
+  React.useEffect(() => {
+    if (!objRef.current) {
+      return;
+    }
+
+    const listener: StateChangeListener = (e) => {
+      console.log('got a drawing state change', JSON.parse(JSON.stringify(e)))
+
+      setChangeCounter((s) => {
+        return s + 1;
+      })
+    }
+
+    objRef.current.addStateChangeListener(listener);
+    return () => {
+      objRef.current?.removeStateChangeListener(listener);
+    }
+  })
+
+
+  React.useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!objRef.current) {
+        return;
+      }
+
+      objRef.current.sendEvent({
+        kind: EventKind.KeyDown,
+        key: e.key,
+      })
+    }
+
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (!objRef.current) {
+        return;
+      }
+
+      objRef.current.sendEvent({
+        kind: EventKind.KeyUp,
+        key: e.key,
+      })
+    }
+
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('keyup', onKeyUp);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('keyup', onKeyUp)
+    }
+  })
+
+
+  return (
+    <>
+      <line x1={0} y1={0} x2={1000} y2={1000} stroke='black' strokeWidth={1} />
+      <text x="100" y="100">{objRef.current?.getState().tool.kind.toString()}</text>
+    </>
+  );
+}
+
 interface CanvasProps {
   style?: CSSProperties;
 }
@@ -451,37 +520,6 @@ function Canvas(props: PropsWithChildren<CanvasProps>) {
     e.preventDefault();
   }
 
-  React.useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      switch (e.key) {
-      case 'p':
-        dispatch({
-          type: 'selectTool',
-          toolType: ToolType.Pen,
-        })
-        break;
-
-      case 's':
-        dispatch({
-          type: 'selectTool',
-          toolType: ToolType.Selector,
-        })
-        break;
-      }
-    }
-
-    const onKeyUp = (e: KeyboardEvent) => {
-
-    }
-
-    document.addEventListener('keydown', onKeyDown);
-    document.addEventListener('keyup', onKeyUp);
-    return () => {
-      document.removeEventListener('keydown', onKeyDown);
-      document.removeEventListener('keyup', onKeyUp)
-    }
-  })
-
   return (
     <div style={{ ...props.style, flexDirection: 'column', display: 'flex' }}>
       <Toolbar state={state} />
@@ -501,14 +539,7 @@ function Canvas(props: PropsWithChildren<CanvasProps>) {
             preserveAspectRatio='none'
             xmlns="http://www.w3.org/2000/svg"
           >
-            <DataCanvas
-              state={state}
-            />
-            <ToolboxCanvas
-              state={state}
-              mouseX={mousePoint.x}
-              mouseY={mousePoint.y}
-            />
+            <DrawingWrapper />
           </svg>
         </div>
       </div>
