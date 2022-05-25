@@ -40,6 +40,15 @@ enum ActionKind {
     SelectTool,
 }
 
+function actionToSave(kind: ActionKind): boolean {
+    switch (kind) {
+    case ActionKind.AddNode:
+        return false;
+    case ActionKind.SelectTool:
+        return false;
+    }
+}
+
 type Action =
     {
         kind: ActionKind.AddNode,
@@ -56,10 +65,13 @@ type Tool =
     } |
     {
         kind: ToolKind.Pen,
+        tempObjectMap: ObjectMap,
+        tempObjectID: ObjectID,
     }
 
 interface ActionHistory {
     root?: ActionHistoryNode,
+    cur?: ActionHistoryNode,
 }
 
 interface ActionHistoryNode {
@@ -67,21 +79,118 @@ interface ActionHistoryNode {
     children: ActionHistoryNode[],
 }
 
+enum ObjectKind {
+    Node,
+    Line,
+    Path,
+    ControlPoint,
+}
+
+type ObjectID = number;
+
+type CanvasObject = {
+    id: ObjectID;
+} & (
+    {
+        kind: ObjectKind.Node,
+        point: Point,
+    } |
+    {
+        kind: ObjectKind.Line,
+        point1: ObjectID,
+        point2: ObjectID,
+    } |
+    {
+        kind: ObjectKind.Path,
+        points: ObjectID[],
+        lines: ObjectID[],
+    }
+)
+
+type ObjectMap = {
+    [key: ObjectID]: CanvasObject | undefined,
+};
+
 export interface State {
     tool: Tool,
     history: ActionHistory,
+    objects: ObjectMap,
+}
+
+const generateID = (() => {
+    let id = 0;
+    return (): ObjectID => {
+        return ++id;
+    }
+})();
+
+function appendHistory(state: State, action: Action) {
+    if (!state.history.cur) {
+        state.history.cur = state.history.root;
+    }
+    if (!state.history.cur) {
+        if (!state.history.root) {
+            state.history.root = {
+                action,
+                children: [],
+            }
+            state.history.cur = state.history.root;
+        }
+    } else {
+        const newChild = {
+            action,
+            children: [],
+        }
+        state.history.cur.children.push(newChild);
+        state.history.cur = newChild;
+    }
 }
 
 function executeAction(state: State, action: Action): boolean {
+    if (actionToSave(action.kind)) {
+        appendHistory(state, action);
+    }
+
     switch (action.kind) {
     case ActionKind.AddNode:
+        switch (state.tool.kind) {
+        case ToolKind.Pen:
+            const tempObject = state.tool.tempObjectMap[state.tool.tempObjectID];
+            if (!tempObject || tempObject.kind !== ObjectKind.Path) {
+                return false;
+            }
+
+            const newPoint: CanvasObject = {
+                id: generateID(),
+                kind: ObjectKind.Node,
+                point: action.point,
+            }
+            state.tool.tempObjectMap[newPoint.id] = newPoint;
+            tempObject.points.push(newPoint.id);
+            return true;
+        }
+
         return false;
 
     case ActionKind.SelectTool:
+        if (state.tool.kind === action.tool) {
+            return false;
+        }
+
         switch (action.tool) {
         case ToolKind.Pen:
+            const path: CanvasObject = {
+                id: generateID(),
+                kind: ObjectKind.Path,
+                points: [],
+                lines: [],
+            };
             state.tool = {
                 kind: ToolKind.Pen,
+                tempObjectMap: {
+                    [path.id]: path,
+                },
+                tempObjectID: path.id,
             }
             return true;
 
@@ -94,13 +203,21 @@ function executeAction(state: State, action: Action): boolean {
     }
 }
 
-function generateAction(event: Event): Action | null {
+function generateAction(state: State, event: Event): Action | null {
     switch (event.kind) {
     case EventKind.MouseMove:
         // TODO: generate action
         return null;
 
     case EventKind.MouseDown:
+        switch (state.tool.kind) {
+        case ToolKind.Pen:
+            return {
+                kind: ActionKind.AddNode,
+                point: event.point,
+            }
+        }
+
         return null;
 
     case EventKind.MouseUp:
@@ -138,7 +255,8 @@ export class Drawing {
         tool: {
             kind: ToolKind.Selector,
         },
-        history: {}
+        history: {},
+        objects: {},
     };
 
     private listeners: Set<StateChangeListener> = new Set();
@@ -156,7 +274,7 @@ export class Drawing {
     }
 
     public sendEvent(event: Event) {
-        const action = generateAction(event);
+        const action = generateAction(this.state, event);
         if (!action) {
             return;
         }

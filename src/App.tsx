@@ -384,7 +384,12 @@ function CommandList(props: PropsWithChildren<CommandListProps>) {
   )
 }
 
+interface DrawingWrapperProps {
+}
+
 function DrawingWrapper() {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
   const [, setChangeCounter] = React.useState(0);
 
   const objRef = React.useRef<Drawing>();
@@ -443,12 +448,37 @@ function DrawingWrapper() {
     }
   })
 
+  const onMouseDown: React.MouseEventHandler<SVGSVGElement> = (e) => {
+    if (!containerRef.current || !objRef.current) {
+      return;
+    }
+
+    const { offsetLeft, offsetTop } = containerRef.current
+
+    objRef.current.sendEvent({
+      kind: EventKind.MouseDown,
+      point: [e.clientX - offsetLeft, e.clientY - offsetTop],
+    })
+
+    e.preventDefault();
+  };
 
   return (
-    <>
-      <line x1={0} y1={0} x2={1000} y2={1000} stroke='black' strokeWidth={1} />
-      <text x="100" y="100">{objRef.current?.getState().tool.kind.toString()}</text>
-    </>
+    <div ref={containerRef} style={{ flex: 1 }}>
+      <svg
+        style={{ flex: 1 }}
+        onMouseDown={onMouseDown}
+        // onMouseUp={onMouseUp}
+        // onMouseMove={onMouseMove}
+        // onDoubleClick={onDoubleClick}
+        width="100%"
+        height="100%"
+        preserveAspectRatio='none'
+        xmlns="http://www.w3.org/2000/svg"
+      >
+
+      </svg>
+    </div>
   );
 }
 
@@ -527,21 +557,7 @@ function Canvas(props: PropsWithChildren<CanvasProps>) {
         <div style={{ width: 300, backgroundColor: 'lightblue' }}>
           <CommandList state={state} />
         </div>
-        <div ref={containerRef} style={{ flex: 1 }}>
-          <svg
-            style={{ flex: 1 }}
-            onMouseDown={onMouseDown}
-            onMouseUp={onMouseUp}
-            onMouseMove={onMouseMove}
-            onDoubleClick={onDoubleClick}
-            width="100%"
-            height="100%"
-            preserveAspectRatio='none'
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            <DrawingWrapper />
-          </svg>
-        </div>
+        <DrawingWrapper />
       </div>
     </div>
   );
