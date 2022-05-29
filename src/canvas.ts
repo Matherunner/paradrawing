@@ -30,22 +30,31 @@ export type Event =
         key: string,
     }
 
-enum ToolKind {
+export enum ToolKind {
     Selector,
     Pen,
 }
 
-enum ActionKind {
+export enum ActionKind {
     AddNode,
+    UpdateNextNode,
     SelectTool,
+    CommitPen,
+    UpdateMousePoint,
 }
 
 function actionToSave(kind: ActionKind): boolean {
     switch (kind) {
     case ActionKind.AddNode:
         return false;
+    case ActionKind.UpdateNextNode:
+        return false;
     case ActionKind.SelectTool:
         return false;
+    case ActionKind.UpdateMousePoint:
+        return false;
+    case ActionKind.CommitPen:
+        return true;
     }
 }
 
@@ -55,8 +64,16 @@ type Action =
         point: Point,
     } |
     {
+        kind: ActionKind.UpdateNextNode,
+        point: Point,
+    } |
+    {
         kind: ActionKind.SelectTool,
         tool: ToolKind,
+    } |
+    {
+        kind: ActionKind.UpdateMousePoint,
+        point: Point,
     }
 
 type Tool =
@@ -67,6 +84,7 @@ type Tool =
         kind: ToolKind.Pen,
         tempObjectMap: ObjectMap,
         tempObjectID: ObjectID,
+        nextObjectID: ObjectID,
     }
 
 interface ActionHistory {
@@ -79,7 +97,7 @@ interface ActionHistoryNode {
     children: ActionHistoryNode[],
 }
 
-enum ObjectKind {
+export enum ObjectKind {
     Node,
     Line,
     Path,
@@ -115,6 +133,7 @@ export interface State {
     tool: Tool,
     history: ActionHistory,
     objects: ObjectMap,
+    mousePoint: Point,
 }
 
 const generateID = (() => {
@@ -160,17 +179,51 @@ function executeAction(state: State, action: Action): boolean {
                 return false;
             }
 
-            const newPoint: CanvasObject = {
+            const nextObj = state.tool.tempObjectMap[state.tool.nextObjectID];
+            if (!nextObj || nextObj.kind !== ObjectKind.Path || !nextObj.points.length) {
+                return false;
+            }
+
+            const lastPoint = state.tool.tempObjectMap[nextObj.points[nextObj.points.length - 1]];
+            if (!lastPoint || lastPoint.kind !== ObjectKind.Node) {
+                return false;
+            }
+
+            tempObject.points.push(lastPoint.id);
+
+            const nextPoint: CanvasObject = {
                 id: generateID(),
                 kind: ObjectKind.Node,
-                point: action.point,
+                point: state.mousePoint,
             }
-            state.tool.tempObjectMap[newPoint.id] = newPoint;
-            tempObject.points.push(newPoint.id);
+            state.tool.tempObjectMap[nextPoint.id] = nextPoint;
+            nextObj.points.push(nextPoint.id);
             return true;
         }
 
         return false;
+
+    case ActionKind.UpdateNextNode:
+        switch (state.tool.kind) {
+        case ToolKind.Pen:
+            const nextObj = state.tool.tempObjectMap[state.tool.nextObjectID];
+            if (!nextObj || nextObj.kind !== ObjectKind.Path) {
+                return false;
+            }
+
+            if (!nextObj.points.length) {
+                return false;
+            }
+
+            const nextPoint = state.tool.tempObjectMap[nextObj.points[nextObj.points.length - 1]];
+            if (nextPoint && nextPoint.kind === ObjectKind.Node) {
+                nextPoint.point = action.point;
+            }
+            return true;
+
+        default:
+            return false;
+        }
 
     case ActionKind.SelectTool:
         if (state.tool.kind === action.tool) {
@@ -185,12 +238,26 @@ function executeAction(state: State, action: Action): boolean {
                 points: [],
                 lines: [],
             };
+            const nextNode: CanvasObject = {
+                id: generateID(),
+                kind: ObjectKind.Node,
+                point: state.mousePoint,
+            }
+            const nextPath: CanvasObject = {
+                id: generateID(),
+                kind: ObjectKind.Path,
+                points: [nextNode.id],
+                lines: [],
+            }
             state.tool = {
                 kind: ToolKind.Pen,
                 tempObjectMap: {
                     [path.id]: path,
+                    [nextPath.id]: nextPath,
+                    [nextNode.id]: nextNode,
                 },
                 tempObjectID: path.id,
+                nextObjectID: nextPath.id,
             }
             return true;
 
@@ -199,49 +266,84 @@ function executeAction(state: State, action: Action): boolean {
                 kind: ToolKind.Selector,
             }
             return true;
+        
+        default:
+            return false;
         }
+
+    case ActionKind.UpdateMousePoint:
+        state.mousePoint = action.point;
+        return true;
     }
 }
 
-function generateAction(state: State, event: Event): Action | null {
+function generateAction(state: State, event: Event): Action[] {
+    const actions: Action[] = [];
+
     switch (event.kind) {
     case EventKind.MouseMove:
-        // TODO: generate action
-        return null;
+        actions.push({
+            kind: ActionKind.UpdateMousePoint,
+            point: event.point,
+        })
+
+        switch (state.tool.kind) {
+        case ToolKind.Pen:
+            actions.push({
+                kind: ActionKind.UpdateNextNode,
+                point: event.point,
+            });
+            break;
+        }
+
+        break;
 
     case EventKind.MouseDown:
         switch (state.tool.kind) {
         case ToolKind.Pen:
-            return {
+            actions.push({
                 kind: ActionKind.AddNode,
                 point: event.point,
-            }
+            });
+            break;
         }
 
-        return null;
+        break;
 
     case EventKind.MouseUp:
-        return null;
+        break;
 
     case EventKind.KeyDown:
         switch (event.key) {
         case 'p':
-            return {
+            actions.push({
                 kind: ActionKind.SelectTool,
                 tool: ToolKind.Pen
-            }
+            });
+            break;
         case 's':
-            return {
+            actions.push({
                 kind: ActionKind.SelectTool,
                 tool: ToolKind.Selector,
+            });
+            break;
+        case 'Enter':
+            switch (state.tool.kind) {
+            case ToolKind.Pen:
+                // actions.push({
+                //     kind: ActionKind.
+                // })
+                break;
             }
-        default:
-            return null;
+            break;
         }
+        break;
 
     case EventKind.KeyUp:
-        return null;
+        break;
     }
+
+    return actions;
 }
 
 export interface StateChangeEvent {
@@ -257,6 +359,7 @@ export class Drawing {
         },
         history: {},
         objects: {},
+        mousePoint: [50, 50],
     };
 
     private listeners: Set<StateChangeListener> = new Set();
@@ -274,12 +377,17 @@ export class Drawing {
     }
 
     public sendEvent(event: Event) {
-        const action = generateAction(this.state, event);
-        if (!action) {
+        const actions = generateAction(this.state, event);
+        if (!actions.length) {
             return;
         }
 
-        const changed = executeAction(this.state, action);
+        let changed = false;
+        for (const action of actions) {
+            if (executeAction(this.state, action)) {
+                changed = true;
+            }
+        }
         if (!changed) {
             return;
         }

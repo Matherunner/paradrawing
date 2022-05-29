@@ -1,17 +1,6 @@
 import React, { CSSProperties, PropsWithChildren } from 'react';
 import styles from './App.module.css';
-import { Drawing, EventKind, StateChangeListener } from './canvas';
-
-const enum ToolType {
-  Selector,
-  Pen,
-}
-
-interface ToolboxCanvasProps {
-  state: ControllerState;
-  mouseX: number;
-  mouseY: number;
-}
+import { Drawing, EventKind, ObjectKind, StateChangeListener, ToolKind } from './canvas';
 
 function pathCommandsFromObject(object: Object): string {
   let pathCmds = '';
@@ -27,61 +16,6 @@ function pathCommandsFromObject(object: Object): string {
     }
   }
   return pathCmds;
-}
-
-function ToolboxCanvas(props: PropsWithChildren<ToolboxCanvasProps>) {
-  switch (props.state.currentToolType) {
-    case ToolType.Pen:
-      let pathCmds = '';
-      const { temporaryPath } = props.state.penTool;
-      if (temporaryPath?.type === ObjectType.Path) {
-        pathCmds = pathCommandsFromObject(temporaryPath);
-        if (temporaryPath.nodes.length) {
-          pathCmds += `L${props.mouseX} ${props.mouseY}`
-        }
-      }
-
-      return (
-        <path d={pathCmds} stroke='black' strokeWidth={1} fill='none' />
-      )
-
-    case ToolType.Selector:
-      const hovered = hoveredObjects(props.state.canvas.objects, {
-        x: props.mouseX,
-        y: props.mouseY,
-      });
-      if (hovered) {
-        const pathCmds = pathCommandsFromObject(hovered);
-        return (
-          <path d={pathCmds} stroke='yellow' strokeWidth={1} fill='none' />
-        )
-      }
-
-      return null;
-
-    default:
-      return null;
-  }
-}
-
-interface DataCanvasProps {
-  state: ControllerState;
-}
-
-function DataCanvas(props: PropsWithChildren<DataCanvasProps>) {
-  const elems = [];
-
-  const { objects } = props.state.canvas;
-  for (const object of objects) {
-    const cmd = pathCommandsFromObject(object);
-    elems.push(<path key={object.id} d={cmd} stroke='black' strokeWidth={1} fill='none' />);
-  }
-
-  return (
-    <>
-      {elems}
-    </>
-  );
 }
 
 interface Vec2D {
@@ -175,171 +109,35 @@ function hoveredObjects(objects: Object[], mouse: Vec2D): Object | undefined {
   return undefined;
 }
 
-interface PenToolState {
-  temporaryPath?: Object;
-}
-
-interface CanvasState {
-  objectID: number,
-  objects: Object[],
-}
-
 interface ControllerState {
-  currentToolType: ToolType;
-  canvas: CanvasState,
-  penTool: PenToolState;
+  currentToolType: ToolKind;
   commands: CommandAction[];
 }
 
 const initialControllerState = {
-  currentToolType: ToolType.Pen,
-  canvas: {
-    objectID: 0,
-    objects: [],
-  },
-  penTool: {},
+  currentToolType: ToolKind.Pen,
   commands: [],
-}
-
-function samePoint(a: Vec2D, b: Vec2D): boolean {
-  return a.x === b.x && a.y === b.y;
 }
 
 type CommandAction =
   { type: 'commitObject', object: Object }
 
 type ControllerAction =
-  { type: 'selectTool', toolType: ToolType } |
+  { type: 'selectTool', toolType: ToolKind } |
   { type: 'addTemporaryNode', point: Vec2D } |
   CommandAction
 
 function controllerReducer(state: ControllerState, action: ControllerAction): ControllerState {
   switch (action.type) {
   case 'selectTool': {
-    let { penTool } = state;
-    switch (action.toolType) {
-    case ToolType.Pen:
-      break;
-    case ToolType.Selector:
-      penTool = {}
-      break;
-    }
-
     return {
       ...state,
-      penTool,
       currentToolType: action.toolType,
     }
   }
 
-  case 'addTemporaryNode': {
-    let { temporaryPath } = state.penTool;
-
-    let objectID = state.canvas.objectID;
-    if (!temporaryPath) {
-      temporaryPath = {
-        // TODO: assume always path for now
-        type: ObjectType.Path,
-        id: objectID + 1,
-        nodes: [],
-      }
-    }
-
-    if (temporaryPath.type === ObjectType.Path) {
-      const { point: lastPoint } = temporaryPath.nodes[temporaryPath.nodes.length - 1] || {
-        point: {
-          x: NaN,
-          y: NaN,
-        },
-      };
-      if (!samePoint(lastPoint, action.point)) {
-        temporaryPath.nodes = [
-          ...temporaryPath.nodes,
-          {
-            point: action.point,
-            leftControlPoint: null,
-            rightControlPoint: null,
-          }
-        ]
-      }
-    }
-
-    return {
-      ...state,
-      penTool: {
-        ...state.penTool,
-        temporaryPath,
-      }
-    };
-  }
-
-  case 'commitObject': {
-    const objectID = state.canvas.objectID + 1;
-    if (action.object.id !== objectID) {
-      return state
-    }
-
-    return {
-      ...state,
-      currentToolType: ToolType.Selector,
-      penTool: {},
-      canvas: {
-        ...state.canvas,
-        objects: [
-          ...state.canvas.objects,
-          action.object,
-        ],
-        objectID,
-      },
-      commands: [
-        ...state.commands,
-        action,
-      ]
-    }
-  }
-  }
-}
-
-type ToolInput =
-  { type: 'mouseDown', point: Vec2D } |
-  { type: 'doubleClick', point: Vec2D }
-
-function runTool(state: ControllerState, dispatch: React.Dispatch<ControllerAction>, input: ToolInput) {
-  switch (state.currentToolType) {
-  case ToolType.Pen:
-    switch (input.type) {
-    case 'mouseDown':
-      dispatch({
-        type: 'addTemporaryNode',
-        point: {
-          x: input.point.x,
-          y: input.point.y,
-        }
-      })
-      break;
-
-    case 'doubleClick':
-      const { temporaryPath } = state.penTool;
-      if (!temporaryPath) {
-        return;
-      }
-
-      let action: ControllerAction | undefined;
-      if (temporaryPath.type === ObjectType.Path) {
-        action = {
-          type: 'commitObject',
-          object: temporaryPath,
-        }
-      }
-      if (action) {
-        dispatch(action);
-      }
-      break;
-    }
-    break;
-
-  case ToolType.Selector:
-    break;
+  default:
+    return state;
   }
 }
 
@@ -347,11 +145,11 @@ interface ToolbarProps {
   state: ControllerState,
 }
 
-function toolTypeToString(type: ToolType): string {
+function toolTypeToString(type: ToolKind): string {
   switch (type) {
-  case ToolType.Selector:
+  case ToolKind.Selector:
     return "Selector"
-  case ToolType.Pen:
+  case ToolKind.Pen:
     return "Pen"
   }
 }
@@ -385,9 +183,10 @@ function CommandList(props: PropsWithChildren<CommandListProps>) {
 }
 
 interface DrawingWrapperProps {
+  dispatch: React.Dispatch<ControllerAction>,
 }
 
-function DrawingWrapper() {
+function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
   const containerRef = React.useRef<HTMLDivElement>(null);
 
   const [, setChangeCounter] = React.useState(0);
@@ -396,45 +195,46 @@ function DrawingWrapper() {
   if (!objRef.current) {
     objRef.current = new Drawing();
   }
+  const drawingRef = objRef.current;
+
+  const updateGlobalState = () => {
+    props.dispatch({
+      type: 'selectTool',
+      toolType: drawingRef.getState().tool.kind,
+    })
+  }
 
   React.useEffect(() => {
-    if (!objRef.current) {
-      return;
-    }
-
     const listener: StateChangeListener = (e) => {
       console.log('got a drawing state change', JSON.parse(JSON.stringify(e)))
 
       setChangeCounter((s) => {
         return s + 1;
       })
+
+      updateGlobalState();
     }
 
-    objRef.current.addStateChangeListener(listener);
+    drawingRef.addStateChangeListener(listener);
     return () => {
-      objRef.current?.removeStateChangeListener(listener);
+      drawingRef.removeStateChangeListener(listener);
     }
-  })
+  }, [drawingRef])
 
+  React.useEffect(() => {
+    updateGlobalState();
+  }, [])
 
   React.useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (!objRef.current) {
-        return;
-      }
-
-      objRef.current.sendEvent({
+      drawingRef.sendEvent({
         kind: EventKind.KeyDown,
         key: e.key,
       })
     }
 
     const onKeyUp = (e: KeyboardEvent) => {
-      if (!objRef.current) {
-        return;
-      }
-
-      objRef.current.sendEvent({
+      drawingRef.sendEvent({
         kind: EventKind.KeyUp,
         key: e.key,
       })
@@ -449,13 +249,13 @@ function DrawingWrapper() {
   })
 
   const onMouseDown: React.MouseEventHandler<SVGSVGElement> = (e) => {
-    if (!containerRef.current || !objRef.current) {
+    if (!containerRef.current) {
       return;
     }
 
     const { offsetLeft, offsetTop } = containerRef.current
 
-    objRef.current.sendEvent({
+    drawingRef.sendEvent({
       kind: EventKind.MouseDown,
       point: [e.clientX - offsetLeft, e.clientY - offsetTop],
     })
@@ -463,20 +263,64 @@ function DrawingWrapper() {
     e.preventDefault();
   };
 
+  const onMouseMove: React.MouseEventHandler<SVGSVGElement> = (e) => {
+    if (!containerRef.current) {
+      return;
+    }
+
+    const { offsetLeft, offsetTop } = containerRef.current;
+
+    drawingRef.sendEvent({
+      kind: EventKind.MouseMove,
+      point: [e.clientX - offsetLeft, e.clientY - offsetTop],
+    })
+
+    e.preventDefault();
+  }
+
+  const svgs = [];
+
+  const tool = drawingRef.getState().tool;
+  if (tool.kind === ToolKind.Pen) {
+    const nextObj = tool.tempObjectMap[tool.nextObjectID];
+    if (nextObj) {
+      switch (nextObj.kind) {
+      case ObjectKind.Path:
+        for (const lineObjectID of nextObj.lines) {
+          const lineObj = tool.tempObjectMap[lineObjectID];
+          if (lineObj?.kind === ObjectKind.Line) {
+            const point1Obj = tool.tempObjectMap[lineObj.point1];
+            const point2Obj = tool.tempObjectMap[lineObj.point2];
+            if (point1Obj && point2Obj && point1Obj.kind === ObjectKind.Node && point2Obj.kind === ObjectKind.Node) {
+              svgs.push(<line key={lineObj.id} x1={point1Obj.point[0]} y1={point1Obj.point[1]} x2={point2Obj.point[0]} y2={point2Obj.point[1]} strokeWidth={1} stroke="black" />)
+            }
+          }
+        }  
+        for (const pointObjectID of nextObj.points) {
+          const pointObj = tool.tempObjectMap[pointObjectID];
+          if (pointObj?.kind === ObjectKind.Node) {
+            svgs.push(<circle key={pointObjectID} cx={pointObj.point[0]} cy={pointObj.point[1]} r={3} fill="none" strokeWidth={1} stroke="black" />);
+          }
+        }
+        break;
+      }
+    }
+  }
+
   return (
     <div ref={containerRef} style={{ flex: 1 }}>
       <svg
         style={{ flex: 1 }}
         onMouseDown={onMouseDown}
         // onMouseUp={onMouseUp}
-        // onMouseMove={onMouseMove}
+        onMouseMove={onMouseMove}
         // onDoubleClick={onDoubleClick}
         width="100%"
         height="100%"
         preserveAspectRatio='none'
         xmlns="http://www.w3.org/2000/svg"
       >
-
+        {svgs}
       </svg>
     </div>
   );
@@ -489,67 +333,6 @@ interface CanvasProps {
 function Canvas(props: PropsWithChildren<CanvasProps>) {
   const [state, dispatch] = React.useReducer(controllerReducer, initialControllerState);
 
-  const containerRef = React.useRef<HTMLDivElement>(null);
-
-  const [mousePoint, setMousePoint] = React.useState({ x: 0, y: 0 });
-
-  const onMouseDown: React.MouseEventHandler<SVGSVGElement> = (e) => {
-    if (!containerRef.current) {
-      return;
-    }
-
-    const { offsetLeft, offsetTop } = containerRef.current
-
-    runTool(state, dispatch, {
-      type: 'mouseDown',
-      point: {
-        x: e.clientX - offsetLeft,
-        y: e.clientY - offsetTop,
-      }
-    })
-
-    e.preventDefault();
-  };
-
-  const onMouseUp: React.MouseEventHandler<SVGSVGElement> = (e) => {
-
-    e.preventDefault();
-  };
-
-  const onMouseMove: React.MouseEventHandler<SVGSVGElement> = (e) => {
-    if (!containerRef.current) {
-      return;
-    }
-
-    // This method of getting the position only works if the none of the ancestor is absolutely positioned.
-    const { offsetLeft, offsetTop } = containerRef.current;
-
-    setMousePoint({
-      x: e.clientX - offsetLeft,
-      y: e.clientY - offsetTop,
-    });
-
-    e.preventDefault();
-  }
-
-  const onDoubleClick: React.MouseEventHandler<SVGSVGElement> = (e) => {
-    if (!containerRef.current) {
-      return;
-    }
-
-    const { offsetLeft, offsetTop } = containerRef.current;
-
-    runTool(state, dispatch, {
-      type: 'doubleClick',
-      point: {
-        x: e.clientX - offsetLeft,
-        y: e.clientY - offsetTop,
-      }
-    })
-
-    e.preventDefault();
-  }
-
   return (
     <div style={{ ...props.style, flexDirection: 'column', display: 'flex' }}>
       <Toolbar state={state} />
@@ -557,7 +340,7 @@ function Canvas(props: PropsWithChildren<CanvasProps>) {
         <div style={{ width: 300, backgroundColor: 'lightblue' }}>
           <CommandList state={state} />
         </div>
-        <DrawingWrapper />
+        <DrawingWrapper dispatch={dispatch} />
       </div>
     </div>
   );
