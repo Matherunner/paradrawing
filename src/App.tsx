@@ -1,6 +1,6 @@
 import React, { CSSProperties, PropsWithChildren } from 'react';
 import styles from './App.module.css';
-import { Drawing, EventKind, ObjectKind, StateChangeListener, ToolKind } from './canvas';
+import { DataAction, Drawing, EventKind, ObjectKind, StateChangeListener, ToolKind } from './canvas';
 
 function pathCommandsFromObject(object: Object): string {
   let pathCmds = '';
@@ -111,30 +111,31 @@ function hoveredObjects(objects: Object[], mouse: Vec2D): Object | undefined {
 
 interface ControllerState {
   currentToolType: ToolKind;
-  commands: CommandAction[];
+  commands: string;
 }
 
 const initialControllerState = {
   currentToolType: ToolKind.Pen,
-  commands: [],
+  commands: '',
 }
-
-type CommandAction =
-  { type: 'commitObject', object: Object }
 
 type ControllerAction =
   { type: 'selectTool', toolType: ToolKind } |
-  { type: 'addTemporaryNode', point: Vec2D } |
-  CommandAction
+  { type: 'updateHistory', actions: string }
 
 function controllerReducer(state: ControllerState, action: ControllerAction): ControllerState {
   switch (action.type) {
-  case 'selectTool': {
+  case 'selectTool':
     return {
       ...state,
       currentToolType: action.toolType,
     }
-  }
+
+  case 'updateHistory':
+    return {
+      ...state,
+      commands: action.actions,
+    }
 
   default:
     return state;
@@ -158,7 +159,7 @@ function Toolbar(props: PropsWithChildren<ToolbarProps>) {
   const toolboxName = toolTypeToString(props.state.currentToolType);
 
   return (
-    <div style={{ height: '2em', width: '100%', backgroundColor: '#eeeeff' }}>
+    <div style={{ flex: "0 0 2em", width: '100%', backgroundColor: '#eeeeff' }}>
       <span>{toolboxName}</span>
     </div>
   );
@@ -169,17 +170,22 @@ interface CommandListProps {
 }
 
 function CommandList(props: PropsWithChildren<CommandListProps>) {
-  const items = [];
-
-  for (const cmd of props.state.commands) {
-    items.push(<li key={cmd.object.id}><span>{cmd.type}</span></li>);
-  }
-
   return (
-    <ul>
-      {items}
-    </ul>
+    <pre style={{ flex: '1 1 0', overflowY: 'auto' }}>
+      {props.state.commands}
+    </pre>
   )
+  // const items = [];
+
+  // for (const cmd of props.state.commands) {
+  //   items.push(<li key={cmd.id}><span>#{cmd.id} {cmd.kind}</span></li>);
+  // }
+
+  // return (
+  //   <ul>
+  //     {items}
+  //   </ul>
+  // )
 }
 
 interface DrawingWrapperProps {
@@ -201,6 +207,11 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
     props.dispatch({
       type: 'selectTool',
       toolType: drawingRef.getToolState().tool.kind,
+    })
+
+    props.dispatch({
+      type: 'updateHistory',
+      actions: JSON.stringify(drawingRef.getToolState().history.root, null, 2),
     })
   }
 
@@ -293,7 +304,7 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
               svgs.push(<line key={lineObj.id} x1={point1Obj.point[0]} y1={point1Obj.point[1]} x2={point2Obj.point[0]} y2={point2Obj.point[1]} strokeWidth={1} stroke="blue" />)
             }
           }
-        }  
+        }
         for (const pointObjectID of nextObj.points) {
           const pointObj = tool.tempObjectMap[pointObjectID];
           if (pointObj?.kind === ObjectKind.Node) {
@@ -316,6 +327,16 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
         const pointObj = dataState.objects[pointID];
         if (pointObj && pointObj.kind === ObjectKind.Node) {
           svgs.push(<circle key={pointID} cx={pointObj.point[0]} cy={pointObj.point[1]} r={3} fill="none" strokeWidth={1} stroke="black" />);
+        }
+      }
+      for (const lineID of v.lines) {
+        const lineObj = dataState.objects[lineID];
+        if (lineObj && lineObj.kind === ObjectKind.Line) {
+          const point1Obj = dataState.objects[lineObj.point1];
+          const point2Obj = dataState.objects[lineObj.point2];
+          if (point1Obj && point2Obj && point1Obj.kind === ObjectKind.Node && point2Obj.kind === ObjectKind.Node) {
+            svgs.push(<line key={lineID} x1={point1Obj.point[0]} y1={point1Obj.point[1]} x2={point2Obj.point[0]} y2={point2Obj.point[1]} strokeWidth={1} stroke="black" />);
+          }
         }
       }
       break;
@@ -351,8 +372,8 @@ function Canvas(props: PropsWithChildren<CanvasProps>) {
   return (
     <div style={{ ...props.style, flexDirection: 'column', display: 'flex' }}>
       <Toolbar state={state} />
-      <div style={{ flex: 1, flexDirection: 'row', display: 'flex' }}>
-        <div style={{ width: 300, backgroundColor: 'lightblue' }}>
+      <div style={{ flex: "1 1 auto", flexDirection: 'row', display: 'flex' }}>
+        <div style={{ width: 300, backgroundColor: 'lightblue', display: 'flex', flexDirection: 'column' }}>
           <CommandList state={state} />
         </div>
         <DrawingWrapper dispatch={dispatch} />

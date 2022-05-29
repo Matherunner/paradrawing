@@ -48,11 +48,13 @@ export enum DataActionKind {
     AddObject,
 }
 
-type DataAction =
+export type DataAction =
     {
+        id: ObjectID,
+    } & ({
         kind: DataActionKind.AddObject,
         map: ObjectMap,
-    }
+    })
 
 type ToolAction =
     {
@@ -218,20 +220,29 @@ function executeToolAction(toolState: ToolState, action: Readonly<ToolAction>): 
                 return false;
             }
 
-            const lastPoint = toolState.tool.tempObjectMap[nextObj.points[nextObj.points.length - 1]];
-            if (!lastPoint || lastPoint.kind !== ObjectKind.Node) {
-                return false;
-            }
+            const lastPointID = nextObj.points[nextObj.points.length - 1];
+            tempObject.points.push(lastPointID);
 
-            tempObject.points.push(lastPoint.id);
+            if (nextObj.lines.length) {
+                const lastLineID = nextObj.lines[nextObj.lines.length - 1];
+                tempObject.lines.push(lastLineID);
+            }
 
             const nextPoint: CanvasObject = {
                 id: generateID(),
                 kind: ObjectKind.Node,
                 point: toolState.mousePoint,
             }
+            const nextLine: CanvasObject = {
+                id: generateID(),
+                kind: ObjectKind.Line,
+                point1: lastPointID,
+                point2: nextPoint.id,
+            }
             toolState.tool.tempObjectMap[nextPoint.id] = nextPoint;
+            toolState.tool.tempObjectMap[nextLine.id] = nextLine;
             nextObj.points.push(nextPoint.id);
+            nextObj.lines.push(nextLine.id);
             return true;
         }
 
@@ -300,7 +311,7 @@ function executeToolAction(toolState: ToolState, action: Readonly<ToolAction>): 
                 kind: ToolKind.Selector,
             }
             return true;
-        
+
         default:
             return false;
         }
@@ -378,6 +389,7 @@ function generateAction(state: Readonly<ToolState>, event: Event): [ToolAction[]
                 filterObjectMap(state.tool.tempObjectMap, [state.tool.tempObjectID]);
 
                 dataActions.push({
+                    id: generateID(),
                     kind: DataActionKind.AddObject,
                     map: state.tool.tempObjectMap,
                 })
