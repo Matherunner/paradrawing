@@ -200,14 +200,12 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
   const updateGlobalState = () => {
     props.dispatch({
       type: 'selectTool',
-      toolType: drawingRef.getState().tool.kind,
+      toolType: drawingRef.getToolState().tool.kind,
     })
   }
 
   React.useEffect(() => {
     const listener: StateChangeListener = (e) => {
-      console.log('got a drawing state change', JSON.parse(JSON.stringify(e)))
-
       setChangeCounter((s) => {
         return s + 1;
       })
@@ -280,7 +278,7 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
 
   const svgs = [];
 
-  const tool = drawingRef.getState().tool;
+  const tool = drawingRef.getToolState().tool;
   if (tool.kind === ToolKind.Pen) {
     const nextObj = tool.tempObjectMap[tool.nextObjectID];
     if (nextObj) {
@@ -292,18 +290,35 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
             const point1Obj = tool.tempObjectMap[lineObj.point1];
             const point2Obj = tool.tempObjectMap[lineObj.point2];
             if (point1Obj && point2Obj && point1Obj.kind === ObjectKind.Node && point2Obj.kind === ObjectKind.Node) {
-              svgs.push(<line key={lineObj.id} x1={point1Obj.point[0]} y1={point1Obj.point[1]} x2={point2Obj.point[0]} y2={point2Obj.point[1]} strokeWidth={1} stroke="black" />)
+              svgs.push(<line key={lineObj.id} x1={point1Obj.point[0]} y1={point1Obj.point[1]} x2={point2Obj.point[0]} y2={point2Obj.point[1]} strokeWidth={1} stroke="blue" />)
             }
           }
         }  
         for (const pointObjectID of nextObj.points) {
           const pointObj = tool.tempObjectMap[pointObjectID];
           if (pointObj?.kind === ObjectKind.Node) {
-            svgs.push(<circle key={pointObjectID} cx={pointObj.point[0]} cy={pointObj.point[1]} r={3} fill="none" strokeWidth={1} stroke="black" />);
+            svgs.push(<circle key={pointObjectID} cx={pointObj.point[0]} cy={pointObj.point[1]} r={3} fill="none" strokeWidth={1} stroke="blue" />);
           }
         }
         break;
       }
+    }
+  }
+
+  const dataState = drawingRef.getDataState();
+  for (const [k, v] of Object.entries(dataState.objects)) {
+    if (!v) {
+      continue;
+    }
+    switch (v.kind) {
+    case ObjectKind.Path:
+      for (const pointID of v.points) {
+        const pointObj = dataState.objects[pointID];
+        if (pointObj && pointObj.kind === ObjectKind.Node) {
+          svgs.push(<circle key={pointID} cx={pointObj.point[0]} cy={pointObj.point[1]} r={3} fill="none" strokeWidth={1} stroke="black" />);
+        }
+      }
+      break;
     }
   }
 

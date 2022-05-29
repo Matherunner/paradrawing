@@ -35,45 +35,45 @@ export enum ToolKind {
     Pen,
 }
 
-export enum ActionKind {
+export enum ToolActionKind {
     AddNode,
     UpdateNextNode,
     SelectTool,
     CommitPen,
     UpdateMousePoint,
+    AddHistory,
 }
 
-function actionToSave(kind: ActionKind): boolean {
-    switch (kind) {
-    case ActionKind.AddNode:
-        return false;
-    case ActionKind.UpdateNextNode:
-        return false;
-    case ActionKind.SelectTool:
-        return false;
-    case ActionKind.UpdateMousePoint:
-        return false;
-    case ActionKind.CommitPen:
-        return true;
+export enum DataActionKind {
+    AddObject,
+}
+
+type DataAction =
+    {
+        kind: DataActionKind.AddObject,
+        map: ObjectMap,
     }
-}
 
-type Action =
+type ToolAction =
     {
-        kind: ActionKind.AddNode,
+        kind: ToolActionKind.AddNode,
         point: Point,
     } |
     {
-        kind: ActionKind.UpdateNextNode,
+        kind: ToolActionKind.UpdateNextNode,
         point: Point,
     } |
     {
-        kind: ActionKind.SelectTool,
+        kind: ToolActionKind.SelectTool,
         tool: ToolKind,
     } |
     {
-        kind: ActionKind.UpdateMousePoint,
+        kind: ToolActionKind.UpdateMousePoint,
         point: Point,
+    } |
+    {
+        kind: ToolActionKind.AddHistory,
+        action: DataAction,
     }
 
 type Tool =
@@ -93,7 +93,7 @@ interface ActionHistory {
 }
 
 interface ActionHistoryNode {
-    action: Action,
+    action: DataAction,
     children: ActionHistoryNode[],
 }
 
@@ -129,10 +129,13 @@ type ObjectMap = {
     [key: ObjectID]: CanvasObject | undefined,
 };
 
-export interface State {
+export interface DataState {
+    objects: ObjectMap,
+}
+
+export interface ToolState {
     tool: Tool,
     history: ActionHistory,
-    objects: ObjectMap,
     mousePoint: Point,
 }
 
@@ -143,7 +146,34 @@ const generateID = (() => {
     }
 })();
 
-function appendHistory(state: State, action: Action) {
+function addToSet<T>(s: Set<T>, ...items: T[]) {
+    for (const item of items) {
+        s.add(item)
+    }
+}
+
+function filterObjectMap(map: ObjectMap, ids: ObjectID[]) {
+    const inc = new Set(ids);
+    for (const id of ids) {
+        const obj = map[id];
+        if (!obj) {
+            continue;
+        }
+        switch (obj.kind) {
+        case ObjectKind.Path:
+            addToSet(inc, ...obj.points)
+            addToSet(inc, ...obj.lines)
+            break;
+        }
+    }
+    for (const key in map) {
+        if (!inc.has(+key)) {
+            delete map[key];
+        }
+    }
+}
+
+function appendHistory(state: ToolState, action: DataAction) {
     if (!state.history.cur) {
         state.history.cur = state.history.root;
     }
@@ -165,26 +195,30 @@ function appendHistory(state: State, action: Action) {
     }
 }
 
-function executeAction(state: State, action: Action): boolean {
-    if (actionToSave(action.kind)) {
-        appendHistory(state, action);
-    }
-
+function executeDataAction(state: DataState, action: Readonly<DataAction>): boolean {
     switch (action.kind) {
-    case ActionKind.AddNode:
-        switch (state.tool.kind) {
+    case DataActionKind.AddObject:
+        Object.assign(state.objects, action.map);
+        return true;
+    }
+}
+
+function executeToolAction(toolState: ToolState, action: Readonly<ToolAction>): boolean {
+    switch (action.kind) {
+    case ToolActionKind.AddNode:
+        switch (toolState.tool.kind) {
         case ToolKind.Pen:
-            const tempObject = state.tool.tempObjectMap[state.tool.tempObjectID];
+            const tempObject = toolState.tool.tempObjectMap[toolState.tool.tempObjectID];
             if (!tempObject || tempObject.kind !== ObjectKind.Path) {
                 return false;
             }
 
-            const nextObj = state.tool.tempObjectMap[state.tool.nextObjectID];
+            const nextObj = toolState.tool.tempObjectMap[toolState.tool.nextObjectID];
             if (!nextObj || nextObj.kind !== ObjectKind.Path || !nextObj.points.length) {
                 return false;
             }
 
-            const lastPoint = state.tool.tempObjectMap[nextObj.points[nextObj.points.length - 1]];
+            const lastPoint = toolState.tool.tempObjectMap[nextObj.points[nextObj.points.length - 1]];
             if (!lastPoint || lastPoint.kind !== ObjectKind.Node) {
                 return false;
             }
@@ -194,19 +228,19 @@ function executeAction(state: State, action: Action): boolean {
             const nextPoint: CanvasObject = {
                 id: generateID(),
                 kind: ObjectKind.Node,
-                point: state.mousePoint,
+                point: toolState.mousePoint,
             }
-            state.tool.tempObjectMap[nextPoint.id] = nextPoint;
+            toolState.tool.tempObjectMap[nextPoint.id] = nextPoint;
             nextObj.points.push(nextPoint.id);
             return true;
         }
 
         return false;
 
-    case ActionKind.UpdateNextNode:
-        switch (state.tool.kind) {
+    case ToolActionKind.UpdateNextNode:
+        switch (toolState.tool.kind) {
         case ToolKind.Pen:
-            const nextObj = state.tool.tempObjectMap[state.tool.nextObjectID];
+            const nextObj = toolState.tool.tempObjectMap[toolState.tool.nextObjectID];
             if (!nextObj || nextObj.kind !== ObjectKind.Path) {
                 return false;
             }
@@ -215,7 +249,7 @@ function executeAction(state: State, action: Action): boolean {
                 return false;
             }
 
-            const nextPoint = state.tool.tempObjectMap[nextObj.points[nextObj.points.length - 1]];
+            const nextPoint = toolState.tool.tempObjectMap[nextObj.points[nextObj.points.length - 1]];
             if (nextPoint && nextPoint.kind === ObjectKind.Node) {
                 nextPoint.point = action.point;
             }
@@ -225,8 +259,8 @@ function executeAction(state: State, action: Action): boolean {
             return false;
         }
 
-    case ActionKind.SelectTool:
-        if (state.tool.kind === action.tool) {
+    case ToolActionKind.SelectTool:
+        if (toolState.tool.kind === action.tool) {
             return false;
         }
 
@@ -241,7 +275,7 @@ function executeAction(state: State, action: Action): boolean {
             const nextNode: CanvasObject = {
                 id: generateID(),
                 kind: ObjectKind.Node,
-                point: state.mousePoint,
+                point: toolState.mousePoint,
             }
             const nextPath: CanvasObject = {
                 id: generateID(),
@@ -249,7 +283,7 @@ function executeAction(state: State, action: Action): boolean {
                 points: [nextNode.id],
                 lines: [],
             }
-            state.tool = {
+            toolState.tool = {
                 kind: ToolKind.Pen,
                 tempObjectMap: {
                     [path.id]: path,
@@ -262,7 +296,7 @@ function executeAction(state: State, action: Action): boolean {
             return true;
 
         case ToolKind.Selector:
-            state.tool = {
+            toolState.tool = {
                 kind: ToolKind.Selector,
             }
             return true;
@@ -271,26 +305,31 @@ function executeAction(state: State, action: Action): boolean {
             return false;
         }
 
-    case ActionKind.UpdateMousePoint:
-        state.mousePoint = action.point;
+    case ToolActionKind.UpdateMousePoint:
+        toolState.mousePoint = action.point;
+        return true;
+
+    case ToolActionKind.AddHistory:
+        appendHistory(toolState, action.action);
         return true;
     }
 }
 
-function generateAction(state: State, event: Event): Action[] {
-    const actions: Action[] = [];
+function generateAction(state: Readonly<ToolState>, event: Event): [ToolAction[], DataAction[]] {
+    const toolActions: ToolAction[] = [];
+    const dataActions: DataAction[] = [];
 
     switch (event.kind) {
     case EventKind.MouseMove:
-        actions.push({
-            kind: ActionKind.UpdateMousePoint,
+        toolActions.push({
+            kind: ToolActionKind.UpdateMousePoint,
             point: event.point,
         })
 
         switch (state.tool.kind) {
         case ToolKind.Pen:
-            actions.push({
-                kind: ActionKind.UpdateNextNode,
+            toolActions.push({
+                kind: ToolActionKind.UpdateNextNode,
                 point: event.point,
             });
             break;
@@ -301,8 +340,8 @@ function generateAction(state: State, event: Event): Action[] {
     case EventKind.MouseDown:
         switch (state.tool.kind) {
         case ToolKind.Pen:
-            actions.push({
-                kind: ActionKind.AddNode,
+            toolActions.push({
+                kind: ToolActionKind.AddNode,
                 point: event.point,
             });
             break;
@@ -316,23 +355,32 @@ function generateAction(state: State, event: Event): Action[] {
     case EventKind.KeyDown:
         switch (event.key) {
         case 'p':
-            actions.push({
-                kind: ActionKind.SelectTool,
+            toolActions.push({
+                kind: ToolActionKind.SelectTool,
                 tool: ToolKind.Pen
             });
             break;
         case 's':
-            actions.push({
-                kind: ActionKind.SelectTool,
+            toolActions.push({
+                kind: ToolActionKind.SelectTool,
                 tool: ToolKind.Selector,
             });
             break;
         case 'Enter':
             switch (state.tool.kind) {
             case ToolKind.Pen:
-                // actions.push({
-                //     kind: ActionKind.
-                // })
+                toolActions.push({
+                    kind: ToolActionKind.SelectTool,
+                    tool: ToolKind.Selector,
+                })
+
+                // Kind of a hack to do it here and mutate the object
+                filterObjectMap(state.tool.tempObjectMap, [state.tool.tempObjectID]);
+
+                dataActions.push({
+                    kind: DataActionKind.AddObject,
+                    map: state.tool.tempObjectMap,
+                })
                 break;
             }
             break;
@@ -343,29 +391,43 @@ function generateAction(state: State, event: Event): Action[] {
         break;
     }
 
-    return actions;
+    for (const action of dataActions) {
+        toolActions.push({
+            kind: ToolActionKind.AddHistory,
+            action,
+        })
+    }
+
+    return [toolActions, dataActions];
 }
 
 export interface StateChangeEvent {
-    state: State,
+    state: ToolState,
 }
 
 export type StateChangeListener = (e: StateChangeEvent) => void;
 
 export class Drawing {
-    private state: State = {
+    private toolState: ToolState = {
         tool: {
             kind: ToolKind.Selector,
         },
         history: {},
-        objects: {},
         mousePoint: [50, 50],
     };
 
+    private dataState: DataState = {
+        objects: {},
+    }
+
     private listeners: Set<StateChangeListener> = new Set();
 
-    public getState(): Readonly<State> {
-        return this.state;
+    public getToolState(): Readonly<ToolState> {
+        return this.toolState;
+    }
+
+    public getDataState(): Readonly<DataState> {
+        return this.dataState;
     }
 
     public addStateChangeListener(h: StateChangeListener) {
@@ -377,23 +439,28 @@ export class Drawing {
     }
 
     public sendEvent(event: Event) {
-        const actions = generateAction(this.state, event);
-        if (!actions.length) {
-            return;
-        }
+        const [toolActions, dataActions] = generateAction(this.toolState, event);
 
         let changed = false;
-        for (const action of actions) {
-            if (executeAction(this.state, action)) {
+
+        for (const action of toolActions) {
+            if (executeToolAction(this.toolState, action)) {
                 changed = true;
             }
         }
+
+        for (const action of dataActions) {
+            if (executeDataAction(this.dataState, action)) {
+                changed = true;
+            }
+        }
+
         if (!changed) {
             return;
         }
 
         const changeEv = {
-            state: this.state,
+            state: this.toolState,
         }
         this.listeners.forEach((v) => {
             v(changeEv);
