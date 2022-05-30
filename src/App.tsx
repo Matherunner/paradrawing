@@ -266,6 +266,7 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
 
     drawingRef.sendEvent({
       kind: EventKind.MouseDown,
+      ctrl: e.ctrlKey,
       point: [e.clientX - offsetLeft, e.clientY - offsetTop],
     })
 
@@ -288,9 +289,11 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
   }
 
   const svgs = [];
+  let selectedObjects;
 
   const tool = drawingRef.getToolState().tool;
-  if (tool.kind === ToolKind.Pen) {
+  switch (tool.kind) {
+  case ToolKind.Pen: {
     const nextObj = tool.tempObjectMap[tool.nextObjectID];
     if (nextObj) {
       switch (nextObj.kind) {
@@ -314,6 +317,12 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
         break;
       }
     }
+    break;
+  }
+
+  case ToolKind.Selector:
+    selectedObjects = tool.selectedObjects
+    break;
   }
 
   const dataState = drawingRef.getDataState();
@@ -335,7 +344,12 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
           const point1Obj = dataState.objects[lineObj.point1];
           const point2Obj = dataState.objects[lineObj.point2];
           if (point1Obj && point2Obj && point1Obj.kind === ObjectKind.Node && point2Obj.kind === ObjectKind.Node) {
-            svgs.push(<line key={lineID} x1={point1Obj.point[0]} y1={point1Obj.point[1]} x2={point2Obj.point[0]} y2={point2Obj.point[1]} strokeWidth={1} stroke="black" />);
+            const selected = selectedObjects && selectedObjects.has(lineID);
+            let stroke = "black"
+            if (selected) {
+              stroke = "red"
+            }
+            svgs.push(<line key={lineID} x1={point1Obj.point[0]} y1={point1Obj.point[1]} x2={point2Obj.point[0]} y2={point2Obj.point[1]} strokeWidth={1} stroke={stroke} />);
           }
         }
       }

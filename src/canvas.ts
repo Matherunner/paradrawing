@@ -1,4 +1,4 @@
-export type Point = [number, number];
+export type Vec2D = [number, number];
 
 export enum EventKind {
     MouseMove,
@@ -11,15 +11,16 @@ export enum EventKind {
 export type Event =
     {
         kind: EventKind.MouseMove,
-        point: Point,
+        point: Vec2D,
     } |
     {
         kind: EventKind.MouseDown,
-        point: Point,
+        ctrl: boolean,
+        point: Vec2D,
     } |
     {
         kind: EventKind.MouseUp,
-        point: Point,
+        point: Vec2D,
     } |
     {
         kind: EventKind.KeyDown,
@@ -42,6 +43,8 @@ export enum ToolActionKind {
     CommitPen,
     UpdateMousePoint,
     AddHistory,
+    SelectObject,
+    DeselectObject,
 }
 
 export enum DataActionKind {
@@ -59,11 +62,11 @@ export type DataAction =
 type ToolAction =
     {
         kind: ToolActionKind.AddNode,
-        point: Point,
+        point: Vec2D,
     } |
     {
         kind: ToolActionKind.UpdateNextNode,
-        point: Point,
+        point: Vec2D,
     } |
     {
         kind: ToolActionKind.SelectTool,
@@ -71,16 +74,25 @@ type ToolAction =
     } |
     {
         kind: ToolActionKind.UpdateMousePoint,
-        point: Point,
+        point: Vec2D,
     } |
     {
         kind: ToolActionKind.AddHistory,
         action: DataAction,
+    } |
+    {
+        kind: ToolActionKind.SelectObject,
+        objectID: ObjectID,
+    } |
+    {
+        kind: ToolActionKind.DeselectObject,
+        objectID: ObjectID,
     }
 
 type Tool =
     {
         kind: ToolKind.Selector,
+        selectedObjects: Set<ObjectID>,
     } |
     {
         kind: ToolKind.Pen,
@@ -113,7 +125,7 @@ type CanvasObject = {
 } & (
     {
         kind: ObjectKind.Node,
-        point: Point,
+        point: Vec2D,
     } |
     {
         kind: ObjectKind.Line,
@@ -138,7 +150,7 @@ export interface DataState {
 export interface ToolState {
     tool: Tool,
     history: ActionHistory,
-    mousePoint: Point,
+    mousePoint: Vec2D,
 }
 
 const generateID = (() => {
@@ -147,6 +159,42 @@ const generateID = (() => {
         return ++id;
     }
 })();
+
+function vecSub(a: Vec2D, b: Vec2D): Vec2D {
+    return [a[0] - b[0], a[1] - b[1]]
+}
+
+function vecDot(a: Vec2D, b: Vec2D): number {
+    return a[0] * b[0] + a[1] * b[1]
+}
+
+function hitLineSegment(a: Vec2D, b: Vec2D, tol: number, mouse: Vec2D): boolean {
+    const mouseFromA = vecSub(mouse, a);
+    const bFromA = vecSub(b, a);
+    const proj = vecDot(mouseFromA, bFromA);
+    const normSq = vecDot(bFromA, bFromA);
+    if (normSq < 1e-2) {
+        return false;
+    }
+
+    if (proj <= 0 && proj * proj / normSq >= tol * tol) {
+        return false;
+    }
+
+    // Equivalent to if (proj / norm(b - a) >= norm(b - a) + tol)
+    const tmp1 = proj - normSq;
+    if (tmp1 >= 0 && tmp1 * tmp1 / normSq >= tol * tol) {
+        return false;
+    }
+
+    const mouseFromANormSq = vecDot(mouseFromA, mouseFromA);
+    const prepDistSq = mouseFromANormSq - proj * proj / normSq;
+    if (prepDistSq > tol * tol) {
+        return false;
+    }
+
+    return true;
+}
 
 function addToSet<T>(s: Set<T>, ...items: T[]) {
     for (const item of items) {
@@ -309,6 +357,7 @@ function executeToolAction(toolState: ToolState, action: Readonly<ToolAction>): 
         case ToolKind.Selector:
             toolState.tool = {
                 kind: ToolKind.Selector,
+                selectedObjects: new Set(),
             }
             return true;
 
@@ -323,10 +372,29 @@ function executeToolAction(toolState: ToolState, action: Readonly<ToolAction>): 
     case ToolActionKind.AddHistory:
         appendHistory(toolState, action.action);
         return true;
+
+    case ToolActionKind.SelectObject:
+        switch (toolState.tool.kind) {
+        case ToolKind.Selector:
+            toolState.tool.selectedObjects.add(action.objectID);
+            return true;
+        }
+        return false;
+
+    case ToolActionKind.DeselectObject:
+        switch (toolState.tool.kind) {
+        case ToolKind.Selector:
+            if (toolState.tool.selectedObjects.has(action.objectID)) {
+                toolState.tool.selectedObjects.delete(action.objectID);
+                return true;
+            }
+            return false;
+        }
+        return false;
     }
 }
 
-function generateAction(state: Readonly<ToolState>, event: Event): [ToolAction[], DataAction[]] {
+function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<DataState>, event: Event): [ToolAction[], DataAction[]] {
     const toolActions: ToolAction[] = [];
     const dataActions: DataAction[] = [];
 
@@ -337,7 +405,7 @@ function generateAction(state: Readonly<ToolState>, event: Event): [ToolAction[]
             point: event.point,
         })
 
-        switch (state.tool.kind) {
+        switch (toolState.tool.kind) {
         case ToolKind.Pen:
             toolActions.push({
                 kind: ToolActionKind.UpdateNextNode,
@@ -349,7 +417,53 @@ function generateAction(state: Readonly<ToolState>, event: Event): [ToolAction[]
         break;
 
     case EventKind.MouseDown:
-        switch (state.tool.kind) {
+        switch (toolState.tool.kind) {
+        case ToolKind.Selector:
+            let hitObjID;
+            loop: for (const obj of Object.values(dataState.objects)) {
+                if (!obj) {
+                    continue
+                }
+
+                switch (obj.kind) {
+                    case ObjectKind.Line:
+                    const point1Obj = dataState.objects[obj.point1]
+                    const point2Obj = dataState.objects[obj.point2]
+                    if (point1Obj && point2Obj && point1Obj.kind === ObjectKind.Node && point2Obj.kind === ObjectKind.Node) {
+                        const hit = hitLineSegment(point1Obj.point, point2Obj.point, 10, event.point)
+                        if (hit) {
+                            hitObjID = obj.id;
+                            break loop;
+                        }
+                    }
+                    break;
+                }
+            }
+
+            if (event.ctrl) {
+                if (hitObjID) {
+                    toolActions.push({
+                        kind: ToolActionKind.DeselectObject,
+                        objectID: hitObjID,
+                    })
+                }
+            } else {
+                if (hitObjID) {
+                    toolActions.push({
+                        kind: ToolActionKind.SelectObject,
+                        objectID: hitObjID,
+                    })
+                } else {
+                    toolState.tool.selectedObjects.forEach((objID) => {
+                        toolActions.push({
+                            kind: ToolActionKind.DeselectObject,
+                            objectID: objID,
+                        })
+                    })
+                }
+            }
+            break;
+
         case ToolKind.Pen:
             toolActions.push({
                 kind: ToolActionKind.AddNode,
@@ -378,7 +492,7 @@ function generateAction(state: Readonly<ToolState>, event: Event): [ToolAction[]
             });
             break;
         case 'Enter':
-            switch (state.tool.kind) {
+            switch (toolState.tool.kind) {
             case ToolKind.Pen:
                 toolActions.push({
                     kind: ToolActionKind.SelectTool,
@@ -386,12 +500,12 @@ function generateAction(state: Readonly<ToolState>, event: Event): [ToolAction[]
                 })
 
                 // Kind of a hack to do it here and mutate the object
-                filterObjectMap(state.tool.tempObjectMap, [state.tool.tempObjectID]);
+                filterObjectMap(toolState.tool.tempObjectMap, [toolState.tool.tempObjectID]);
 
                 dataActions.push({
                     id: generateID(),
                     kind: DataActionKind.AddObject,
-                    map: state.tool.tempObjectMap,
+                    map: toolState.tool.tempObjectMap,
                 })
                 break;
             }
@@ -423,6 +537,7 @@ export class Drawing {
     private toolState: ToolState = {
         tool: {
             kind: ToolKind.Selector,
+            selectedObjects: new Set(),
         },
         history: {},
         mousePoint: [50, 50],
@@ -451,7 +566,7 @@ export class Drawing {
     }
 
     public sendEvent(event: Event) {
-        const [toolActions, dataActions] = generateAction(this.toolState, event);
+        const [toolActions, dataActions] = generateAction(this.toolState, this.dataState, event);
 
         let changed = false;
 
