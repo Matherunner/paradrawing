@@ -49,6 +49,7 @@ export enum ToolActionKind {
 
 export enum DataActionKind {
     AddObject,
+    AddConstraint,
 }
 
 export type DataAction =
@@ -57,6 +58,11 @@ export type DataAction =
     } & ({
         kind: DataActionKind.AddObject,
         map: ObjectMap,
+    } |
+    {
+        kind: DataActionKind.AddConstraint,
+        // TODO: add constraint type
+        objectIDs: ObjectID[],
     })
 
 type ToolAction =
@@ -143,8 +149,14 @@ type ObjectMap = {
     [key: ObjectID]: CanvasObject | undefined,
 };
 
+export interface Constraint {
+    // TODO: add type
+    objectIDs: ObjectID[],
+}
+
 export interface DataState {
     objects: ObjectMap,
+    constraints: Constraint[],
 }
 
 export interface ToolState {
@@ -245,10 +257,119 @@ function appendHistory(state: ToolState, action: DataAction) {
     }
 }
 
+function computePerpCons(state: DataState, objectA: ObjectID, objectB: ObjectID): { p1A: Vec2D, p2A: Vec2D, p1B: Vec2D, p2B: Vec2D } | undefined {
+    const objA = state.objects[objectA]
+    const objB = state.objects[objectB]
+    if (!objA || !objB || objA.kind !== ObjectKind.Line || objB.kind !== ObjectKind.Line) {
+        return;
+    }
+
+    const p1A = state.objects[objA.point1];
+    const p2A = state.objects[objA.point2];
+    const p1B = state.objects[objB.point1];
+    const p2B = state.objects[objB.point2];
+    if (!p1A || !p2A || !p1B || !p2B || p1A.kind !== ObjectKind.Node || p2A.kind !== ObjectKind.Node || p1B.kind !== ObjectKind.Node || p2B.kind !== ObjectKind.Node) {
+        return;
+    }
+
+    // Get initial conditions, using the current positions
+    let x = [
+        p1A.point[0],
+        p1A.point[1],
+        p2A.point[0],
+        p2A.point[1],
+        p1B.point[0],
+        p1B.point[1],
+        p2B.point[0],
+        p2B.point[1],
+    ]
+    let newX = [0, 0, 0, 0, 0, 0, 0, 0];
+
+    const perpEqn = (x: number[]) => {
+        return (x[2] - x[0]) * (x[6] - x[4]) + (x[3] - x[1]) * (x[7] - x[5])
+    }
+
+    // TODO: need one more equation at least, the p2A and p1B are actually the same point
+    // TODO: need two more equations, the line lengths are the same
+
+    const updateGrad = (grad: number[], x: number[]) => {
+        const perp = perpEqn(x);
+        for (let i = 0; i < 8; ++i) {
+            grad[i] = perp;
+        }
+        grad[0] *= x[4] - x[6]
+        grad[1] *= x[5] - x[7]
+        grad[2] *= x[6] - x[4]
+        grad[3] *= x[7] - x[5]
+        grad[4] *= x[0] - x[2]
+        grad[5] *= x[1] - x[3]
+        grad[6] *= x[2] - x[0]
+        grad[7] *= x[3] - x[1]
+    }
+
+    const grad = [0, 0, 0, 0, 0, 0, 0, 0];
+
+    const step = 0.00001;
+
+    // Iterate to find final position
+    for (let i = 0; i < 10000; ++i) {
+        updateGrad(grad, x);
+        for (let j = 0; j < 8; ++j) {
+            newX[j] = x[j] - step * grad[j];
+        }
+        const tmp = x
+        x = newX
+        newX = tmp
+    }
+
+    console.log('result', x, perpEqn(x))
+
+    return {
+        p1A: [x[0], x[1]],
+        p2A: [x[2], x[3]],
+        p1B: [x[4], x[5]],
+        p2B: [x[6], x[7]],
+    }
+}
+
 function executeDataAction(state: DataState, action: Readonly<DataAction>): boolean {
     switch (action.kind) {
     case DataActionKind.AddObject:
         Object.assign(state.objects, action.map);
+        return true;
+    case DataActionKind.AddConstraint:
+        state.constraints.push({
+            objectIDs: action.objectIDs,
+        })
+
+        // TODO: compute constraints!
+
+        // FIXME: hardcoded
+        const newSoln = computePerpCons(state, action.objectIDs[0], action.objectIDs[1])
+        if (!newSoln) {
+            console.error('failed to get a solution')
+            return false;
+        }
+
+        const objA = state.objects[action.objectIDs[0]]
+        const objB = state.objects[action.objectIDs[1]]
+        if (!objA || !objB || objA.kind !== ObjectKind.Line || objB.kind !== ObjectKind.Line) {
+            return false;
+        }
+
+        const p1A = state.objects[objA.point1];
+        const p2A = state.objects[objA.point2];
+        const p1B = state.objects[objB.point1];
+        const p2B = state.objects[objB.point2];
+        if (!p1A || !p2A || !p1B || !p2B || p1A.kind !== ObjectKind.Node || p2A.kind !== ObjectKind.Node || p1B.kind !== ObjectKind.Node || p2B.kind !== ObjectKind.Node) {
+            return false;
+        }
+
+        p1A.point = newSoln.p1A
+        p2A.point = newSoln.p2A
+        p1B.point = newSoln.p1B
+        p2B.point = newSoln.p2B
+
         return true;
     }
 }
@@ -479,6 +600,23 @@ function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<Data
 
     case EventKind.KeyDown:
         switch (event.key) {
+        case 'c':
+            // FIXME: temporary hardcoded constraint
+            switch (toolState.tool.kind) {
+            case ToolKind.Selector:
+                if (toolState.tool.selectedObjects.size !== 2) {
+                    console.log('must select 2 objects to add constraints')
+                    break;
+                }
+
+                dataActions.push({
+                    id: generateID(),
+                    kind: DataActionKind.AddConstraint,
+                    objectIDs: Array.from(toolState.tool.selectedObjects),
+                })
+                break;
+            }
+            break;
         case 'p':
             toolActions.push({
                 kind: ToolActionKind.SelectTool,
@@ -545,6 +683,7 @@ export class Drawing {
 
     private dataState: DataState = {
         objects: {},
+        constraints: [],
     }
 
     private listeners: Set<StateChangeListener> = new Set();
