@@ -1,5 +1,26 @@
 export type Vec2D = [number, number];
 
+export enum ConstraintKind {
+    Perpendicular,
+    Parallel,
+    Distance,
+    Angle,
+    Coincident,
+}
+
+// High level constraint. Not including implicit constraints like a line is made up of two points at a fixed distance
+export type Constraint =
+    {
+        kind: ConstraintKind.Perpendicular,
+        line1: ObjectID,
+        line2: ObjectID,
+    } |
+    {
+        kind: ConstraintKind.Parallel,
+        line1: ObjectID,
+        line2: ObjectID,
+    }
+
 export enum EventKind {
     MouseMove,
     MouseDown,
@@ -61,8 +82,7 @@ export type DataAction =
     } |
     {
         kind: DataActionKind.AddConstraint,
-        // TODO: add constraint type
-        objectIDs: ObjectID[],
+        constraint: Constraint,
     })
 
 type ToolAction =
@@ -148,11 +168,6 @@ type CanvasObject = {
 type ObjectMap = {
     [key: ObjectID]: CanvasObject | undefined,
 };
-
-export interface Constraint {
-    // TODO: add type
-    objectIDs: ObjectID[],
-}
 
 export interface DataState {
     objects: ObjectMap,
@@ -257,78 +272,151 @@ function appendHistory(state: ToolState, action: DataAction) {
     }
 }
 
-function computePerpCons(state: DataState, objectA: ObjectID, objectB: ObjectID): { p1A: Vec2D, p2A: Vec2D, p1B: Vec2D, p2B: Vec2D } | undefined {
-    const objA = state.objects[objectA]
-    const objB = state.objects[objectB]
-    if (!objA || !objB || objA.kind !== ObjectKind.Line || objB.kind !== ObjectKind.Line) {
-        return;
+function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
+    // Column index of this variable in the Jacobian matrix
+    const jacColByVar = new Map<string, number>();
+
+    const x: number[] = [];
+    const writeResults: ((x: number[]) => void)[] = [];
+
+    const mapKey = (objectID: ObjectID, index?: number) => {
+        return `${objectID}-${index}`;
     }
 
-    const p1A = state.objects[objA.point1];
-    const p2A = state.objects[objA.point2];
-    const p1B = state.objects[objB.point1];
-    const p2B = state.objects[objB.point2];
-    if (!p1A || !p2A || !p1B || !p2B || p1A.kind !== ObjectKind.Node || p2A.kind !== ObjectKind.Node || p1B.kind !== ObjectKind.Node || p2B.kind !== ObjectKind.Node) {
-        return;
-    }
-
-    // Get initial conditions, using the current positions
-    let x = [
-        p1A.point[0],
-        p1A.point[1],
-        p2A.point[0],
-        p2A.point[1],
-        p1B.point[0],
-        p1B.point[1],
-        p2B.point[0],
-        p2B.point[1],
-    ]
-    let newX = [0, 0, 0, 0, 0, 0, 0, 0];
-
-    const perpEqn = (x: number[]) => {
-        return (x[2] - x[0]) * (x[6] - x[4]) + (x[3] - x[1]) * (x[7] - x[5])
-    }
-
-    // TODO: need one more equation at least, the p2A and p1B are actually the same point
-    // TODO: need two more equations, the line lengths are the same
-
-    const updateGrad = (grad: number[], x: number[]) => {
-        const perp = perpEqn(x);
-        for (let i = 0; i < 8; ++i) {
-            grad[i] = perp;
+    const addVariable = (objectID: ObjectID, index?: number) => {
+        const key = mapKey(objectID, index)
+        if (jacColByVar.has(key)) {
+            return
         }
-        grad[0] *= x[4] - x[6]
-        grad[1] *= x[5] - x[7]
-        grad[2] *= x[6] - x[4]
-        grad[3] *= x[7] - x[5]
-        grad[4] *= x[0] - x[2]
-        grad[5] *= x[1] - x[3]
-        grad[6] *= x[2] - x[0]
-        grad[7] *= x[3] - x[1]
+        jacColByVar.set(key, jacColByVar.size)
+
+        const obj = objects[objectID]
+        if (!obj) {
+            return;
+        }
+
+        switch (obj.kind) {
+        case ObjectKind.Node:
+            if (typeof index !== 'number') {
+                return
+            }
+            const v = obj.point[index];
+            x.push(v)
+
+            const xi = x.length - 1;
+            writeResults.push((x) => {
+                obj.point[index] = x[xi]
+            })
+            break;
+        }
     }
 
-    const grad = [0, 0, 0, 0, 0, 0, 0, 0];
+    const getVariable = (x: number[], objectID: ObjectID, index?: number): [number, number] => {
+        const key = mapKey(objectID, index)
+        const col = jacColByVar.get(key)
+        if (typeof col === 'number') {
+            return [col, x[col]]
+        }
+        throw new Error(`unknown variable: ${key}`)
+    }
 
-    const step = 0.00001;
+    // G column vector
+    const consFns: ((x: number[]) => number)[] = [];
 
-    // Iterate to find final position
+    // Jacobian matrix
+    const jacFns: ((x: number[], grad: number[]) => void)[] = [];
+
+    // FIXME: include all constraints for now
+    for (const cons of constraints) {
+        switch (cons.kind) {
+        case ConstraintKind.Perpendicular:
+            const line1Obj = objects[cons.line1];
+            const line2Obj = objects[cons.line2];
+            if (!line1Obj || !line2Obj || line1Obj.kind !== ObjectKind.Line || line2Obj.kind !== ObjectKind.Line) {
+                continue;
+            }
+
+            addVariable(line1Obj.point1, 0)
+            addVariable(line1Obj.point1, 1)
+            addVariable(line1Obj.point2, 0)
+            addVariable(line1Obj.point2, 1)
+            addVariable(line2Obj.point1, 0)
+            addVariable(line2Obj.point1, 1)
+            addVariable(line2Obj.point2, 0)
+            addVariable(line2Obj.point2, 1)
+
+            consFns.push((x) => {
+                const [, p1x] = getVariable(x, line1Obj.point1, 0)
+                const [, p1y] = getVariable(x, line1Obj.point1, 1)
+                const [, p2x] = getVariable(x, line1Obj.point2, 0)
+                const [, p2y] = getVariable(x, line1Obj.point2, 1)
+                const [, p3x] = getVariable(x, line2Obj.point1, 0)
+                const [, p3y] = getVariable(x, line2Obj.point1, 1)
+                const [, p4x] = getVariable(x, line2Obj.point2, 0)
+                const [, p4y] = getVariable(x, line2Obj.point2, 1)
+                return (p2x - p1x) * (p4x - p3x) + (p2y - p1y) * (p4y - p3y)
+            })
+
+            // Check for implicit constraints, e.g. distance between points, etc
+            // TODO: maybe not needed?
+
+            jacFns.push((x, grad) => {
+                const [p1xCol, p1x] = getVariable(x, line1Obj.point1, 0)
+                const [p1yCol, p1y] = getVariable(x, line1Obj.point1, 1)
+                const [p2xCol, p2x] = getVariable(x, line1Obj.point2, 0)
+                const [p2yCol, p2y] = getVariable(x, line1Obj.point2, 1)
+                const [p3xCol, p3x] = getVariable(x, line2Obj.point1, 0)
+                const [p3yCol, p3y] = getVariable(x, line2Obj.point1, 1)
+                const [p4xCol, p4x] = getVariable(x, line2Obj.point2, 0)
+                const [p4yCol, p4y] = getVariable(x, line2Obj.point2, 1)
+                grad[p1xCol] = p3x - p4x
+                grad[p1yCol] = p3y - p4y
+                grad[p2xCol] = p4x - p3x
+                grad[p2yCol] = p4y - p3y
+                grad[p3xCol] = p1x - p2x
+                grad[p3yCol] = p1y - p2y
+                grad[p4xCol] = p2x - p1x
+                grad[p4yCol] = p2y - p1y
+            })
+
+            break;
+
+        case ConstraintKind.Parallel:
+            break;
+        }
+    }
+
+    const newX = new Array(x.length).fill(0);
+    const G = new Array(consFns.length).fill(0);
+
+    const grad = new Array(consFns.length);
+    for (let i = 0; i < consFns.length; ++i) {
+        grad[i] = new Array(x.length);
+    }
+
+    const gamma = 0.000001;
+
     for (let i = 0; i < 10000; ++i) {
-        updateGrad(grad, x);
-        for (let j = 0; j < 8; ++j) {
-            newX[j] = x[j] - step * grad[j];
+        for (let j = 0; j < jacFns.length; ++j) {
+            jacFns[j](x, grad[j])
         }
-        const tmp = x
-        x = newX
-        newX = tmp
+        for (let j = 0; j < G.length; ++j) {
+            G[j] = consFns[j](x)
+        }
+        for (let j = 0; j < newX.length; ++j) {
+            newX[j] = 0
+            for (let k = 0; k < grad.length; ++k) {
+                newX[j] += grad[k][j] * G[k]
+            }
+        }
+        for (let j = 0; j < x.length; ++j) {
+            x[j] -= gamma * newX[j]
+        }
+        
     }
 
-    console.log('result', x, perpEqn(x))
-
-    return {
-        p1A: [x[0], x[1]],
-        p2A: [x[2], x[3]],
-        p1B: [x[4], x[5]],
-        p2B: [x[6], x[7]],
+    for (const fn of writeResults) {
+        fn(x)
     }
 }
 
@@ -338,37 +426,10 @@ function executeDataAction(state: DataState, action: Readonly<DataAction>): bool
         Object.assign(state.objects, action.map);
         return true;
     case DataActionKind.AddConstraint:
-        state.constraints.push({
-            objectIDs: action.objectIDs,
-        })
+        state.constraints.push(action.constraint)
 
         // TODO: compute constraints!
-
-        // FIXME: hardcoded
-        const newSoln = computePerpCons(state, action.objectIDs[0], action.objectIDs[1])
-        if (!newSoln) {
-            console.error('failed to get a solution')
-            return false;
-        }
-
-        const objA = state.objects[action.objectIDs[0]]
-        const objB = state.objects[action.objectIDs[1]]
-        if (!objA || !objB || objA.kind !== ObjectKind.Line || objB.kind !== ObjectKind.Line) {
-            return false;
-        }
-
-        const p1A = state.objects[objA.point1];
-        const p2A = state.objects[objA.point2];
-        const p1B = state.objects[objB.point1];
-        const p2B = state.objects[objB.point2];
-        if (!p1A || !p2A || !p1B || !p2B || p1A.kind !== ObjectKind.Node || p2A.kind !== ObjectKind.Node || p1B.kind !== ObjectKind.Node || p2B.kind !== ObjectKind.Node) {
-            return false;
-        }
-
-        p1A.point = newSoln.p1A
-        p2A.point = newSoln.p2A
-        p1B.point = newSoln.p1B
-        p2B.point = newSoln.p2B
+        transformConstraints(state.objects, state.constraints)
 
         return true;
     }
@@ -609,10 +670,16 @@ function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<Data
                     break;
                 }
 
+                const objectIDs = Array.from(toolState.tool.selectedObjects);
+
                 dataActions.push({
                     id: generateID(),
                     kind: DataActionKind.AddConstraint,
-                    objectIDs: Array.from(toolState.tool.selectedObjects),
+                    constraint: {
+                        kind: ConstraintKind.Perpendicular,
+                        line1: objectIDs[0],
+                        line2: objectIDs[1],
+                    }
                 })
                 break;
             }
