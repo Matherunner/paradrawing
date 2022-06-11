@@ -1,4 +1,5 @@
 import React, { CSSProperties, PropsWithChildren } from 'react';
+import katex from 'katex';
 import styles from './App.module.css';
 import { DataAction, Drawing, EventKind, ObjectKind, StateChangeListener, ToolKind } from './canvas';
 
