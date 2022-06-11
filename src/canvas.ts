@@ -200,6 +200,12 @@ function vecDot(a: Vec2D, b: Vec2D): number {
     return a[0] * b[0] + a[1] * b[1]
 }
 
+function hitNode(p: Vec2D, tol: number, mouse: Vec2D): boolean {
+    const r = vecSub(mouse, p);
+    const normSq = vecDot(r, r);
+    return normSq < tol * tol
+}
+
 function hitLineSegment(a: Vec2D, b: Vec2D, tol: number, mouse: Vec2D): boolean {
     const mouseFromA = vecSub(mouse, a);
     const bFromA = vecSub(b, a);
@@ -613,7 +619,15 @@ function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<Data
                 }
 
                 switch (obj.kind) {
-                    case ObjectKind.Line:
+                case ObjectKind.Node:
+                    const hit = hitNode(obj.point, 20, event.point)
+                    if (hit) {
+                        hitObjID = obj.id;
+                        break loop;
+                    }
+                    break;
+
+                case ObjectKind.Line:
                     const point1Obj = dataState.objects[obj.point1]
                     const point2Obj = dataState.objects[obj.point2]
                     if (point1Obj && point2Obj && point1Obj.kind === ObjectKind.Node && point2Obj.kind === ObjectKind.Node) {

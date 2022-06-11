@@ -332,7 +332,12 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
       for (const pointID of v.points) {
         const pointObj = dataState.objects[pointID];
         if (pointObj && pointObj.kind === ObjectKind.Node) {
-          svgs.push(<circle key={pointID} cx={pointObj.point[0]} cy={pointObj.point[1]} r={3} fill="none" strokeWidth={1} stroke="black" />);
+          const selected = selectedObjects && selectedObjects.has(pointID)
+          let stroke = 'black'
+          if (selected) {
+            stroke = 'red'
+          }
+          svgs.push(<circle key={pointID} cx={pointObj.point[0]} cy={pointObj.point[1]} r={3} fill="none" strokeWidth={1} stroke={stroke} />);
         }
       }
       for (const lineID of v.lines) {
@@ -342,9 +347,9 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
           const point2Obj = dataState.objects[lineObj.point2];
           if (point1Obj && point2Obj && point1Obj.kind === ObjectKind.Node && point2Obj.kind === ObjectKind.Node) {
             const selected = selectedObjects && selectedObjects.has(lineID);
-            let stroke = "black"
+            let stroke = 'black'
             if (selected) {
-              stroke = "red"
+              stroke = 'red'
             }
             svgs.push(<line key={lineID} x1={point1Obj.point[0]} y1={point1Obj.point[1]} x2={point2Obj.point[0]} y2={point2Obj.point[1]} strokeWidth={1} stroke={stroke} />);
           }
