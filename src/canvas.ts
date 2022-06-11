@@ -391,12 +391,12 @@ function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
 
     const grad = new Array(consFns.length);
     for (let i = 0; i < consFns.length; ++i) {
-        grad[i] = new Array(x.length);
+        grad[i] = new Array(x.length).fill(0);
     }
 
     const gamma = 0.000001;
 
-    for (let i = 0; i < 10000; ++i) {
+    for (let i = 0; i < 1000; ++i) {
         for (let j = 0; j < jacFns.length; ++j) {
             jacFns[j](x, grad[j])
         }
