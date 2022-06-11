@@ -190,6 +190,7 @@ function CommandList(props: PropsWithChildren<CommandListProps>) {
 
 interface DrawingWrapperProps {
   dispatch: React.Dispatch<ControllerAction>,
+  drawing: Drawing,
 }
 
 function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
@@ -197,11 +198,7 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
 
   const [, setChangeCounter] = React.useState(0);
 
-  const objRef = React.useRef<Drawing>();
-  if (!objRef.current) {
-    objRef.current = new Drawing();
-  }
-  const drawingRef = objRef.current;
+  const drawingRef = props.drawing;
 
   const updateGlobalState = () => {
     props.dispatch({
@@ -383,6 +380,12 @@ interface CanvasProps {
 function Canvas(props: PropsWithChildren<CanvasProps>) {
   const [state, dispatch] = React.useReducer(controllerReducer, initialControllerState);
 
+  const objRef = React.useRef<Drawing>();
+  if (!objRef.current) {
+    objRef.current = new Drawing();
+  }
+  const drawingRef = objRef.current;
+
   return (
     <div style={{ ...props.style, flexDirection: 'column', display: 'flex' }}>
       <Toolbar state={state} />
@@ -390,7 +393,20 @@ function Canvas(props: PropsWithChildren<CanvasProps>) {
         <div style={{ width: 300, backgroundColor: 'lightblue', display: 'flex', flexDirection: 'column' }}>
           <CommandList state={state} />
         </div>
-        <DrawingWrapper dispatch={dispatch} />
+        <DrawingWrapper drawing={drawingRef} dispatch={dispatch} />
+        <div style={{ width: 300, backgroundColor: 'lightblue' }}>
+          <div>
+            <p>Constraint</p>
+            <button onClick={(e) => {
+              e.preventDefault()
+              drawingRef.sendEvent({
+                kind: EventKind.AddPerpendicularConstraint,
+              })
+            }}>Perpendicular</button>
+            <button>Parallel</button>
+            <button>Coincident</button>
+          </div>
+        </div>
       </div>
     </div>
   );

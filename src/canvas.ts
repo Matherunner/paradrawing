@@ -27,6 +27,8 @@ export enum EventKind {
     MouseUp,
     KeyDown,
     KeyUp,
+
+    AddPerpendicularConstraint,
 }
 
 export type Event =
@@ -50,6 +52,9 @@ export type Event =
     {
         kind: EventKind.KeyUp,
         key: string,
+    } |
+    {
+        kind: EventKind.AddPerpendicularConstraint,
     }
 
 export enum ToolKind {
@@ -661,29 +666,6 @@ function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<Data
 
     case EventKind.KeyDown:
         switch (event.key) {
-        case 'c':
-            // FIXME: temporary hardcoded constraint
-            switch (toolState.tool.kind) {
-            case ToolKind.Selector:
-                if (toolState.tool.selectedObjects.size !== 2) {
-                    console.log('must select 2 objects to add constraints')
-                    break;
-                }
-
-                const objectIDs = Array.from(toolState.tool.selectedObjects);
-
-                dataActions.push({
-                    id: generateID(),
-                    kind: DataActionKind.AddConstraint,
-                    constraint: {
-                        kind: ConstraintKind.Perpendicular,
-                        line1: objectIDs[0],
-                        line2: objectIDs[1],
-                    }
-                })
-                break;
-            }
-            break;
         case 'p':
             toolActions.push({
                 kind: ToolActionKind.SelectTool,
@@ -719,6 +701,29 @@ function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<Data
         break;
 
     case EventKind.KeyUp:
+        break;
+
+    case EventKind.AddPerpendicularConstraint:
+        switch (toolState.tool.kind) {
+        case ToolKind.Selector:
+            if (toolState.tool.selectedObjects.size !== 2) {
+                console.log('must select 2 objects to add constraints')
+                break;
+            }
+
+            const objectIDs = Array.from(toolState.tool.selectedObjects);
+
+            dataActions.push({
+                id: generateID(),
+                kind: DataActionKind.AddConstraint,
+                constraint: {
+                    kind: ConstraintKind.Perpendicular,
+                    line1: objectIDs[0],
+                    line2: objectIDs[1],
+                }
+            })
+            break;
+        }
         break;
     }
 
