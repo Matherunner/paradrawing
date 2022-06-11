@@ -409,7 +409,12 @@ function Canvas(props: PropsWithChildren<CanvasProps>) {
               })
             }}>Perpendicular</button>
             <button>Parallel</button>
-            <button>Coincident</button>
+            <button onClick={(e) => {
+              e.preventDefault()
+              drawingRef.sendEvent({
+                kind: EventKind.AddCoincidentConstraint,
+              })
+            }}>Coincident</button>
           </div>
         </div>
       </div>

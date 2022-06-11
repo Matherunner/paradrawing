@@ -19,6 +19,11 @@ export type Constraint =
         kind: ConstraintKind.Parallel,
         line1: ObjectID,
         line2: ObjectID,
+    } |
+    {
+        kind: ConstraintKind.Coincident,
+        object1: ObjectID,
+        object2: ObjectID,
     }
 
 export enum EventKind {
@@ -29,6 +34,7 @@ export enum EventKind {
     KeyUp,
 
     AddPerpendicularConstraint,
+    AddCoincidentConstraint,
 }
 
 export type Event =
@@ -55,6 +61,9 @@ export type Event =
     } |
     {
         kind: EventKind.AddPerpendicularConstraint,
+    } |
+    {
+        kind: EventKind.AddCoincidentConstraint,
     }
 
 export enum ToolKind {
@@ -394,6 +403,61 @@ function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
 
         case ConstraintKind.Parallel:
             break;
+
+        case ConstraintKind.Coincident:
+            // Two possibilities: both object1 and object2 are points, or one of them is a point and the other a line
+            const obj1 = objects[cons.object1];
+            const obj2 = objects[cons.object2];
+            if (!obj1 || !obj2) {
+                continue
+            }
+
+            if (obj1.kind === ObjectKind.Node && obj2.kind === ObjectKind.Node) {
+                // Two points coincident, two equations in p1 = p2
+
+                addVariable(obj1.id, 0)
+                addVariable(obj1.id, 1)
+                addVariable(obj2.id, 0)
+                addVariable(obj2.id, 1)
+
+                consFns.push((x) => {
+                    const [, p1x] = getVariable(x, obj1.id, 0)
+                    const [, p2x] = getVariable(x, obj2.id, 0)
+                    return p1x - p2x
+                })
+
+                consFns.push((x) => {
+                    const [, p1y] = getVariable(x, obj1.id, 1)
+                    const [, p2y] = getVariable(x, obj2.id, 1)
+                    return p1y - p2y
+                })
+
+                jacFns.push((x, grad) => {
+                    const [p1xCol,] = getVariable(x, obj1.id, 0)
+                    const [p1yCol,] = getVariable(x, obj1.id, 1)
+                    const [p2xCol,] = getVariable(x, obj2.id, 0)
+                    const [p2yCol,] = getVariable(x, obj2.id, 1)
+                    grad[p1xCol] = 1
+                    grad[p1yCol] = 0
+                    grad[p2xCol] = -1
+                    grad[p2yCol] = 0
+                })
+
+                jacFns.push((x, grad) => {
+                    const [p1xCol,] = getVariable(x, obj1.id, 0)
+                    const [p1yCol,] = getVariable(x, obj1.id, 1)
+                    const [p2xCol,] = getVariable(x, obj2.id, 0)
+                    const [p2yCol,] = getVariable(x, obj2.id, 1)
+                    grad[p1xCol] = 0
+                    grad[p1yCol] = 1
+                    grad[p2xCol] = 0
+                    grad[p2yCol] = -1
+                })
+            } else if (obj1.kind === ObjectKind.Node && obj2.kind === ObjectKind.Line || obj1.kind === ObjectKind.Line && obj2.kind === ObjectKind.Node) {
+
+            }
+
+            break
         }
     }
 
@@ -405,7 +469,7 @@ function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
         grad[i] = new Array(x.length).fill(0);
     }
 
-    const gamma = 0.000001;
+    const gamma = 0.00001;
 
     for (let i = 0; i < 1000; ++i) {
         for (let j = 0; j < jacFns.length; ++j) {
@@ -423,7 +487,6 @@ function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
         for (let j = 0; j < x.length; ++j) {
             x[j] -= gamma * newX[j]
         }
-        
     }
 
     for (const fn of writeResults) {
@@ -620,7 +683,7 @@ function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<Data
 
                 switch (obj.kind) {
                 case ObjectKind.Node:
-                    const hit = hitNode(obj.point, 20, event.point)
+                    const hit = hitNode(obj.point, 15, event.point)
                     if (hit) {
                         hitObjID = obj.id;
                         break loop;
@@ -734,6 +797,29 @@ function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<Data
                     kind: ConstraintKind.Perpendicular,
                     line1: objectIDs[0],
                     line2: objectIDs[1],
+                }
+            })
+            break;
+        }
+        break;
+
+    case EventKind.AddCoincidentConstraint:
+        switch (toolState.tool.kind) {
+        case ToolKind.Selector:
+            if (toolState.tool.selectedObjects.size !== 2) {
+                console.log('must select 2 objects to add constraints')
+                break;
+            }
+
+            const objectIDs = Array.from(toolState.tool.selectedObjects)
+
+            dataActions.push({
+                id: generateID(),
+                kind: DataActionKind.AddConstraint,
+                constraint: {
+                    kind: ConstraintKind.Coincident,
+                    object1: objectIDs[0],
+                    object2: objectIDs[1],
                 }
             })
             break;
