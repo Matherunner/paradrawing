@@ -201,12 +201,44 @@ const generateID = (() => {
     }
 })();
 
+function vecMulX(a: number[], m: number) {
+    for (let i = 0; i < a.length; ++i) {
+        a[i] *= m
+    }
+}
+
+function vecAddX(a: number[], b: number[]) {
+    for (let i = 0; i < a.length; ++i) {
+        a[i] += b[i]
+    }
+}
+
 function vecSub(a: Vec2D, b: Vec2D): Vec2D {
     return [a[0] - b[0], a[1] - b[1]]
 }
 
+function vecSubX(a: number[], b: number[]) {
+    for (let i = 0; i < a.length; ++i) {
+        a[i] -= b[i]
+    }
+}
+
 function vecDot(a: Vec2D, b: Vec2D): number {
     return a[0] * b[0] + a[1] * b[1]
+}
+
+function vecDotX(a: number[], b: number[]): number {
+    let sum = 0;
+    for (let i = 0; i < a.length; ++i) {
+        sum += a[i] * b[i]
+    }
+    return sum
+}
+
+function vecCopyX(a: number[], b: number[]) {
+    for (let i = 0; i < a.length; ++i) {
+        a[i] = b[i]
+    }
 }
 
 function hitNode(p: Vec2D, tol: number, mouse: Vec2D): boolean {
@@ -469,31 +501,75 @@ function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
 }
 
 function gradientDescend(x: number[], consFns: ((x: number[]) => number)[], jacFns: ((x: number[], grad: number[]) => void)[]) {
-    const newX = new Array(x.length).fill(0);
-    const G = new Array(consFns.length).fill(0);
-
-    const grad = new Array(consFns.length);
+    const objFGrad: number[] = new Array(x.length).fill(0);
+    const G: number[] = new Array(consFns.length).fill(0);
+    const grad: number[][] = new Array(consFns.length);
     for (let i = 0; i < consFns.length; ++i) {
         grad[i] = new Array(x.length).fill(0);
     }
 
-    const gamma = 0.00001;
+    // Used for backtracking line search (https://en.wikipedia.org/wiki/Backtracking_line_search)
+    const blsX: number[] = new Array(x.length).fill(0)
+    const blsG: number[] = new Array(consFns.length).fill(0);
 
-    for (let i = 0; i < 1000; ++i) {
-        for (let j = 0; j < jacFns.length; ++j) {
-            jacFns[j](x, grad[j])
+    const evalG = (x: number[], G: number[]) => {
+        for (let i = 0; i < consFns.length; ++i) {
+            G[i] = consFns[i](x)
         }
-        for (let j = 0; j < G.length; ++j) {
-            G[j] = consFns[j](x)
+    }
+
+    const evalJ = (x: number[], grad: number[][]) => {
+        for (let i = 0; i < jacFns.length; ++i) {
+            jacFns[i](x, grad[i])
         }
-        for (let j = 0; j < newX.length; ++j) {
-            newX[j] = 0
-            for (let k = 0; k < grad.length; ++k) {
-                newX[j] += grad[k][j] * G[k]
+    }
+
+    const mulJG = (grad: number[][], G: number[], out: number[]) => {
+        for (let i = 0; i < objFGrad.length; ++i) {
+            out[i] = 0
+            for (let j = 0; j < grad.length; ++j) {
+                out[i] += grad[j][i] * G[j]
             }
         }
+    }
+
+    const tau = 0.5
+    const c = 0.5
+
+    for (let i = 0; i < 100000; ++i) {
+        evalG(x, G)
+        evalJ(x, grad)
+        mulJG(grad, G, objFGrad)
+
+        const m = -vecDotX(objFGrad, objFGrad)
+        const t = -c * m
+        const fx = 0.5 * vecDotX(G, G)
+
+        let gamma = 1000
+
+        for (let j = 0; j < 100; ++j) {
+            // (-gamma) * (delta F) + x
+            vecCopyX(blsX, objFGrad)
+            vecMulX(blsX, -gamma)
+            vecAddX(blsX, x)
+
+            evalG(blsX, blsG)
+            const fxp = 0.5 * vecDotX(blsG, blsG)
+            const diff = fx - fxp
+
+            if (diff < gamma * t) {
+                gamma *= tau
+            } else {
+                break
+            }
+        }
+
         for (let j = 0; j < x.length; ++j) {
-            x[j] -= gamma * newX[j]
+            x[j] -= gamma * objFGrad[j]
+        }
+
+        if (fx < 0.1) {
+            break
         }
     }
 }
