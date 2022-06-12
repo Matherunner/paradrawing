@@ -461,6 +461,14 @@ function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
         }
     }
 
+    gradientDescend(x, consFns, jacFns);
+
+    for (const fn of writeResults) {
+        fn(x)
+    }
+}
+
+function gradientDescend(x: number[], consFns: ((x: number[]) => number)[], jacFns: ((x: number[], grad: number[]) => void)[]) {
     const newX = new Array(x.length).fill(0);
     const G = new Array(consFns.length).fill(0);
 
@@ -487,10 +495,6 @@ function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
         for (let j = 0; j < x.length; ++j) {
             x[j] -= gamma * newX[j]
         }
-    }
-
-    for (const fn of writeResults) {
-        fn(x)
     }
 }
 
