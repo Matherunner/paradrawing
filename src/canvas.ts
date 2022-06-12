@@ -447,6 +447,8 @@ function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
             if (obj1.kind === ObjectKind.Node && obj2.kind === ObjectKind.Node) {
                 // Two points coincident, two equations in p1 = p2
 
+                // FIXME: convergence is too slow, maybe just replace the point ID in the line obj instead of doing it here?
+
                 addVariable(obj1.id, 0)
                 addVariable(obj1.id, 1)
                 addVariable(obj2.id, 0)
@@ -485,8 +487,58 @@ function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
                     grad[p2xCol] = 0
                     grad[p2yCol] = -1
                 })
-            } else if (obj1.kind === ObjectKind.Node && obj2.kind === ObjectKind.Line || obj1.kind === ObjectKind.Line && obj2.kind === ObjectKind.Node) {
+            } else {
+                let lineObj;
+                let pointObj;
+                if (obj1.kind === ObjectKind.Line && obj2.kind === ObjectKind.Node) {
+                    lineObj = obj1
+                    pointObj = obj2
+                } else if (obj1.kind === ObjectKind.Node && obj2.kind === ObjectKind.Line) {
+                    lineObj = obj2
+                    pointObj = obj1
+                } else {
+                    continue
+                }
 
+                const a1 = lineObj.point1
+                const a2 = lineObj.point2
+                const p = pointObj.id
+
+                addVariable(a1, 0)
+                addVariable(a1, 1)
+                addVariable(a2, 0)
+                addVariable(a2, 1)
+                addVariable(p, 0)
+                addVariable(p, 1)
+
+                consFns.push((x) => {
+                    const [,a1x] = getVariable(x, a1, 0)
+                    const [,a1y] = getVariable(x, a1, 1)
+                    const [,a2x] = getVariable(x, a2, 0)
+                    const [,a2y] = getVariable(x, a2, 1)
+                    const [,px] = getVariable(x, p, 0)
+                    const [,py] = getVariable(x, p, 1)
+                    const v1x = a2x - a1x
+                    const v1y = a2y - a1y
+                    const v2x = px - a1x
+                    const v2y = py - a1y
+                    return v1x * v2y - v1y * v2x
+                })
+
+                jacFns.push((x, grad) => {
+                    const [a1xCol, a1x] = getVariable(x, a1, 0)
+                    const [a1yCol, a1y] = getVariable(x, a1, 1)
+                    const [a2xCol, a2x] = getVariable(x, a2, 0)
+                    const [a2yCol, a2y] = getVariable(x, a2, 1)
+                    const [pxCol, px] = getVariable(x, p, 0)
+                    const [pyCol, py] = getVariable(x, p, 1)
+                    grad[a1xCol] = a1y - py
+                    grad[a1yCol] = a2y - a1y
+                    grad[a2xCol] = py - a1y
+                    grad[a2yCol] = a1x - px
+                    grad[pxCol] = a1y - a2y
+                    grad[pyCol] = a2x - a1x
+                })
             }
 
             break
@@ -519,6 +571,11 @@ function gradientDescend(x: number[], consFns: ((x: number[]) => number)[], jacF
     }
 
     const evalJ = (x: number[], grad: number[][]) => {
+        for (let i = 0; i < grad.length; ++i) {
+            for (let j = 0; j < grad[i].length; ++j) {
+                grad[i][j] = 0
+            }
+        }
         for (let i = 0; i < jacFns.length; ++i) {
             jacFns[i](x, grad[i])
         }
