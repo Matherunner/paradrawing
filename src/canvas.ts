@@ -1,4 +1,5 @@
-import { Matrix, pseudoInverse } from 'ml-matrix';
+import { Matrix, pseudoInverse, SingularValueDecomposition } from 'ml-matrix';
+import { ConstKeyword } from 'typescript';
 
 export type Vec2D = [number, number];
 
@@ -8,6 +9,7 @@ export enum ConstraintKind {
     Distance,
     Angle,
     Coincident,
+    Horizontal,
 }
 
 // High level constraint. Not including implicit constraints like a line is made up of two points at a fixed distance
@@ -26,6 +28,10 @@ export type Constraint =
         kind: ConstraintKind.Coincident,
         object1: ObjectID,
         object2: ObjectID,
+    } |
+    {
+        kind: ConstraintKind.Horizontal,
+        object: ObjectID,
     }
 
 export enum EventKind {
@@ -37,6 +43,7 @@ export enum EventKind {
 
     AddPerpendicularConstraint,
     AddCoincidentConstraint,
+    AddHorizontalConstraint,
 }
 
 export type Event =
@@ -66,6 +73,9 @@ export type Event =
     } |
     {
         kind: EventKind.AddCoincidentConstraint,
+    } |
+    {
+        kind: EventKind.AddHorizontalConstraint,
     }
 
 export enum ToolKind {
@@ -438,6 +448,30 @@ function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
         case ConstraintKind.Parallel:
             break;
 
+        case ConstraintKind.Horizontal:
+            const obj = objects[cons.object]
+            if (!obj || obj.kind !== ObjectKind.Line) {
+                continue
+            }
+
+            addVariable(obj.point1, 1)
+            addVariable(obj.point2, 1)
+
+            consFns.push((x) => {
+                const [, p1y] = getVariable(x, obj.point1, 1)
+                const [, p2y] = getVariable(x, obj.point2, 1)
+                return p1y - p2y
+            })
+
+            jacFns.push((x, grad) => {
+                const [p1yCol] = getVariable(x, obj.point1, 1)
+                const [p2yCol] = getVariable(x, obj.point2, 1)
+                grad[p1yCol] = 1
+                grad[p2yCol] = -1
+            })
+
+            break;
+
         case ConstraintKind.Coincident:
             // Two possibilities: both object1 and object2 are points, or one of them is a point and the other a line
             const obj1 = objects[cons.object1];
@@ -581,92 +615,11 @@ function newtonSolve(x: number[], consFns: ((x: number[]) => number)[], jacFns: 
         evalJ(x, J)
         evalF(x, F)
 
-        const inv = pseudoInverse(J, 1e-4)
-        const sol = inv.mmul(F)
-
-        console.log(x, J, F, inv, sol)
+        const svd = new SingularValueDecomposition(J, { autoTranspose: true })
+        const sol = svd.solve(F)
 
         for (let r = 0; r < x.length; ++r) {
             x[r] += sol.get(r, 0)
-        }
-    }
-}
-
-function gradientDescend(x: number[], consFns: ((x: number[]) => number)[], jacFns: ((x: number[], grad: number[]) => void)[]) {
-    const objFGrad: number[] = new Array(x.length).fill(0);
-    const G: number[] = new Array(consFns.length).fill(0);
-    const grad: number[][] = new Array(consFns.length);
-    for (let i = 0; i < consFns.length; ++i) {
-        grad[i] = new Array(x.length).fill(0);
-    }
-
-    // Used for backtracking line search (https://en.wikipedia.org/wiki/Backtracking_line_search)
-    const blsX: number[] = new Array(x.length).fill(0)
-    const blsG: number[] = new Array(consFns.length).fill(0);
-
-    const evalG = (x: number[], G: number[]) => {
-        for (let i = 0; i < consFns.length; ++i) {
-            G[i] = consFns[i](x)
-        }
-    }
-
-    const evalJ = (x: number[], grad: number[][]) => {
-        for (let i = 0; i < grad.length; ++i) {
-            for (let j = 0; j < grad[i].length; ++j) {
-                grad[i][j] = 0
-            }
-        }
-        for (let i = 0; i < jacFns.length; ++i) {
-            jacFns[i](x, grad[i])
-        }
-    }
-
-    const mulJG = (grad: number[][], G: number[], out: number[]) => {
-        for (let i = 0; i < objFGrad.length; ++i) {
-            out[i] = 0
-            for (let j = 0; j < grad.length; ++j) {
-                out[i] += grad[j][i] * G[j]
-            }
-        }
-    }
-
-    const tau = 0.5
-    const c = 0.5
-
-    for (let i = 0; i < 100000; ++i) {
-        evalG(x, G)
-        evalJ(x, grad)
-        mulJG(grad, G, objFGrad)
-
-        const m = -vecDotX(objFGrad, objFGrad)
-        const t = -c * m
-        const fx = 0.5 * vecDotX(G, G)
-
-        let gamma = 1000
-
-        for (let j = 0; j < 100; ++j) {
-            // (-gamma) * (delta F) + x
-            vecCopyX(blsX, objFGrad)
-            vecMulX(blsX, -gamma)
-            vecAddX(blsX, x)
-
-            evalG(blsX, blsG)
-            const fxp = 0.5 * vecDotX(blsG, blsG)
-            const diff = fx - fxp
-
-            if (diff < gamma * t) {
-                gamma *= tau
-            } else {
-                break
-            }
-        }
-
-        for (let j = 0; j < x.length; ++j) {
-            x[j] -= gamma * objFGrad[j]
-        }
-
-        if (fx < 0.1) {
-            break
         }
     }
 }
@@ -997,6 +950,28 @@ function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<Data
                     kind: ConstraintKind.Coincident,
                     object1: objectIDs[0],
                     object2: objectIDs[1],
+                }
+            })
+            break;
+        }
+        break;
+
+    case EventKind.AddHorizontalConstraint:
+        switch (toolState.tool.kind) {
+        case ToolKind.Selector:
+            if (toolState.tool.selectedObjects.size !== 1) {
+                console.log('must select 1 object for the horizontal constraint')
+                break
+            }
+
+            const objectIDs = Array.from(toolState.tool.selectedObjects)
+
+            dataActions.push({
+                id: generateID(),
+                kind: DataActionKind.AddConstraint,
+                constraint: {
+                    kind: ConstraintKind.Horizontal,
+                    object: objectIDs[0],
                 }
             })
             break;

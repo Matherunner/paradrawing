@@ -415,6 +415,12 @@ function Canvas(props: PropsWithChildren<CanvasProps>) {
                 kind: EventKind.AddCoincidentConstraint,
               })
             }}>Coincident</button>
+            <button onClick={(e) => {
+              e.preventDefault()
+              drawingRef.sendEvent({
+                kind: EventKind.AddHorizontalConstraint,
+              })
+            }}>Horizontal</button>
           </div>
         </div>
       </div>
