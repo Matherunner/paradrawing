@@ -1,3 +1,5 @@
+import { Matrix, pseudoInverse } from 'ml-matrix';
+
 export type Vec2D = [number, number];
 
 export enum ConstraintKind {
@@ -545,10 +547,48 @@ function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
         }
     }
 
-    gradientDescend(x, consFns, jacFns);
+    newtonSolve(x, consFns, jacFns)
+
+    // gradientDescend(x, consFns, jacFns);
 
     for (const fn of writeResults) {
         fn(x)
+    }
+}
+
+function newtonSolve(x: number[], consFns: ((x: number[]) => number)[], jacFns: ((x: number[], grad: number[]) => void)[]) {
+    const J = new Matrix(jacFns.length, x.length)
+    const F = new Matrix(consFns.length, 1)
+
+    // Intermediate storage
+    const Jrow = new Array<number>(J.columns).fill(0)
+
+    const evalJ = (x: number[], J: Matrix) => {
+        for (let r = 0; r < J.rows; ++r) {
+            Jrow.fill(0)
+            jacFns[r](x, Jrow)
+            J.setRow(r, Jrow)
+        }
+    }
+
+    const evalF = (x: number[], F: Matrix) => {
+        for (let r = 0; r < F.rows; ++r) {
+            F.set(r, 0, -consFns[r](x))
+        }
+    }
+
+    for (let i = 0; i < 10; ++i) {
+        evalJ(x, J)
+        evalF(x, F)
+
+        const inv = pseudoInverse(J, 1e-4)
+        const sol = inv.mmul(F)
+
+        console.log(x, J, F, inv, sol)
+
+        for (let r = 0; r < x.length; ++r) {
+            x[r] += sol.get(r, 0)
+        }
     }
 }
 
