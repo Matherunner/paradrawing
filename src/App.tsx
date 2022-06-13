@@ -385,6 +385,8 @@ interface CanvasProps {
 function Canvas(props: PropsWithChildren<CanvasProps>) {
   const [state, dispatch] = React.useReducer(controllerReducer, initialControllerState);
 
+  const [distanceConsValue, setDistanceConsValue] = React.useState('100')
+
   const objRef = React.useRef<Drawing>();
   if (!objRef.current) {
     objRef.current = new Drawing();
@@ -421,6 +423,16 @@ function Canvas(props: PropsWithChildren<CanvasProps>) {
                 kind: EventKind.AddHorizontalConstraint,
               })
             }}>Horizontal</button>
+            <input type="text" value={distanceConsValue} onChange={(e) => {
+              setDistanceConsValue(e.target.value)
+            }} />
+            <button onClick={(e) => {
+              e.preventDefault()
+              drawingRef.sendEvent({
+                kind: EventKind.AddDistanceConstraint,
+                distance: +distanceConsValue,
+              })
+            }}>Distance</button>
           </div>
         </div>
       </div>

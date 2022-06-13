@@ -1,5 +1,4 @@
-import { Matrix, pseudoInverse, SingularValueDecomposition } from 'ml-matrix';
-import { ConstKeyword } from 'typescript';
+import { Matrix, SingularValueDecomposition } from 'ml-matrix';
 
 export type Vec2D = [number, number];
 
@@ -32,6 +31,12 @@ export type Constraint =
     {
         kind: ConstraintKind.Horizontal,
         object: ObjectID,
+    } |
+    {
+        kind: ConstraintKind.Distance,
+        distance: number,
+        object1: ObjectID,
+        object2?: ObjectID,
     }
 
 export enum EventKind {
@@ -44,6 +49,7 @@ export enum EventKind {
     AddPerpendicularConstraint,
     AddCoincidentConstraint,
     AddHorizontalConstraint,
+    AddDistanceConstraint,
 }
 
 export type Event =
@@ -76,6 +82,10 @@ export type Event =
     } |
     {
         kind: EventKind.AddHorizontalConstraint,
+    } |
+    {
+        kind: EventKind.AddDistanceConstraint,
+        distance: number,
     }
 
 export enum ToolKind {
@@ -447,6 +457,53 @@ function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
 
         case ConstraintKind.Parallel:
             break;
+
+        case ConstraintKind.Distance: {
+            const obj1 = objects[cons.object1]
+            const obj2 = typeof cons.object2 === 'number' ? objects[cons.object2] : undefined
+            if (!obj1) {
+                continue
+            }
+
+            if (!obj2 && obj1.kind !== ObjectKind.Line) {
+                continue
+            }
+
+            if (obj2 && (obj1.kind !== ObjectKind.Node || obj2?.kind !== ObjectKind.Node)) {
+                continue
+            }
+
+            const p1 = obj1.kind === ObjectKind.Line ? obj1.point1 : obj1.id
+            const p2 = obj1.kind === ObjectKind.Line ? obj1.point2 : obj2 ? obj2.id : -1
+
+            addVariable(p1, 0)
+            addVariable(p1, 1)
+            addVariable(p2, 0)
+            addVariable(p2, 1)
+
+            consFns.push((x) => {
+                const [, p1x] = getVariable(x, p1, 0)
+                const [, p1y] = getVariable(x, p1, 1)
+                const [, p2x] = getVariable(x, p2, 0)
+                const [, p2y] = getVariable(x, p2, 1)
+                const dx = p2x - p1x
+                const dy = p2y - p1y
+                return dx * dx + dy * dy - cons.distance * cons.distance
+            })
+
+            jacFns.push((x, grad) => {
+                const [p1xCol, p1x] = getVariable(x, p1, 0)
+                const [p1yCol, p1y] = getVariable(x, p1, 1)
+                const [p2xCol, p2x] = getVariable(x, p2, 0)
+                const [p2yCol, p2y] = getVariable(x, p2, 1)
+                grad[p1xCol] = -2 * (p2x - p1x)
+                grad[p1yCol] = -2 * (p2y - p1y)
+                grad[p2xCol] = 2 * (p2x - p1x)
+                grad[p2yCol] = 2 * (p2y - p1y)
+            })
+
+            break
+        }
 
         case ConstraintKind.Horizontal:
             const obj = objects[cons.object]
@@ -977,6 +1034,31 @@ function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<Data
             break;
         }
         break;
+
+    case EventKind.AddDistanceConstraint:
+        switch (toolState.tool.kind) {
+        case ToolKind.Selector:
+            if (toolState.tool.selectedObjects.size !== 1 && toolState.tool.selectedObjects.size !== 2) {
+                console.log('must select 1 line, or two points')
+                break
+            }
+
+            const objectIDs = Array.from(toolState.tool.selectedObjects)
+
+            dataActions.push({
+                id: generateID(),
+                kind: DataActionKind.AddConstraint,
+                constraint: {
+                    kind: ConstraintKind.Distance,
+                    distance: event.distance,
+                    object1: objectIDs[0],
+                    object2: objectIDs[1],
+                }
+            })
+
+            break
+        }
+        break
     }
 
     for (const action of dataActions) {
