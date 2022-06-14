@@ -152,6 +152,8 @@ function toolTypeToString(type: ToolKind): string {
     return "Selector"
   case ToolKind.Pen:
     return "Pen"
+  case ToolKind.Text:
+    return "Text"
   }
 }
 
@@ -320,6 +322,18 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
   case ToolKind.Selector:
     selectedObjects = tool.selectedObjects
     break;
+
+  case ToolKind.Text: {
+    const nextObj = tool.tempObjectMap[tool.nextObjectID]
+    if (nextObj && nextObj.kind === ObjectKind.Text) {
+      const pointObj = tool.tempObjectMap[nextObj.point]
+      if (pointObj && pointObj.kind === ObjectKind.Node) {
+        svgs.push(<circle key={pointObj.id} cx={pointObj.point[0]} cy={pointObj.point[1]} r={3} fill="none" strokeWidth={1} stroke="green" />)
+        svgs.push(<text key={nextObj.id} x={pointObj.point[0]} y={pointObj.point[1]}>{nextObj.text}</text>)
+      }
+    }
+    break;
+  }
   }
 
   const dataState = drawingRef.getDataState();
@@ -356,6 +370,20 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
         }
       }
       break;
+
+    case ObjectKind.Text: {
+      const pointObj = dataState.objects[v.point]
+      if (pointObj && pointObj.kind === ObjectKind.Node) {
+        const selected = selectedObjects && selectedObjects.has(pointObj.id)
+        let stroke = 'black'
+        if (selected) {
+          stroke = 'red'
+        }
+        svgs.push(<circle key={pointObj.id} cx={pointObj.point[0]} cy={pointObj.point[1]} r={3} fill="none" strokeWidth={1} stroke={stroke} />)
+        svgs.push(<text key={v.id} x={pointObj.point[0]} y={pointObj.point[1]}>{v.text}</text>)
+      }
+      break
+    }
     }
   }
 
@@ -386,6 +414,8 @@ function Canvas(props: PropsWithChildren<CanvasProps>) {
   const [state, dispatch] = React.useReducer(controllerReducer, initialControllerState);
 
   const [distanceConsValue, setDistanceConsValue] = React.useState('100')
+
+  const [textValue, setTextValue] = React.useState('')
 
   const objRef = React.useRef<Drawing>();
   if (!objRef.current) {
@@ -433,6 +463,23 @@ function Canvas(props: PropsWithChildren<CanvasProps>) {
                 distance: +distanceConsValue,
               })
             }}>Distance</button>
+          </div>
+
+          <div>
+            <p>Text</p>
+            <button onClick={(e) => {
+              e.preventDefault()
+              drawingRef.sendEvent({
+                kind: EventKind.SelectTextTool
+              })
+            }}>Add Text</button>
+            <input type="text" onChange={(e) => {
+              setTextValue(e.target.value)
+              drawingRef.sendEvent({
+                kind: EventKind.SetTextValue,
+                text: e.target.value,
+              })
+            }} value={textValue} />
           </div>
         </div>
       </div>

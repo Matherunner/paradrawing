@@ -50,6 +50,9 @@ export enum EventKind {
     AddCoincidentConstraint,
     AddHorizontalConstraint,
     AddDistanceConstraint,
+
+    SelectTextTool,
+    SetTextValue,
 }
 
 export type Event =
@@ -86,20 +89,34 @@ export type Event =
     {
         kind: EventKind.AddDistanceConstraint,
         distance: number,
+    } |
+    {
+        kind: EventKind.SelectTextTool,
+    } |
+    {
+        kind: EventKind.SetTextValue,
+        text: string,
     }
 
 export enum ToolKind {
     Selector,
     Pen,
+    Text,
 }
 
 export enum ToolActionKind {
+    UpdateMousePoint,
+    SelectTool,
+
     AddNode,
     UpdateNextNode,
-    SelectTool,
+
+    AddText,
+    UpdateNextText,
+
     CommitPen,
-    UpdateMousePoint,
     AddHistory,
+
     SelectObject,
     DeselectObject,
 }
@@ -135,6 +152,11 @@ type ToolAction =
         tool: ToolKind,
     } |
     {
+        kind: ToolActionKind.UpdateNextText,
+        text: string,
+        point: Vec2D,
+    } |
+    {
         kind: ToolActionKind.UpdateMousePoint,
         point: Vec2D,
     } |
@@ -161,6 +183,11 @@ type Tool =
         tempObjectMap: ObjectMap,
         tempObjectID: ObjectID,
         nextObjectID: ObjectID,
+    } |
+    {
+        kind: ToolKind.Text,
+        tempObjectMap: ObjectMap,
+        nextObjectID: ObjectID,
     }
 
 interface ActionHistory {
@@ -178,6 +205,7 @@ export enum ObjectKind {
     Line,
     Path,
     ControlPoint,
+    Text,
 }
 
 type ObjectID = number;
@@ -198,6 +226,11 @@ type CanvasObject = {
         kind: ObjectKind.Path,
         points: ObjectID[],
         lines: ObjectID[],
+    } |
+    {
+        kind: ObjectKind.Text
+        point: ObjectID,
+        text: string,
     }
 )
 
@@ -804,9 +837,49 @@ function executeToolAction(toolState: ToolState, action: Readonly<ToolAction>): 
             }
             return true;
 
+        case ToolKind.Text: {
+            const nextNode: CanvasObject = {
+                id: generateID(),
+                kind: ObjectKind.Node,
+                point: toolState.mousePoint,
+            }
+            const nextText: CanvasObject = {
+                id: generateID(),
+                kind: ObjectKind.Text,
+                point: nextNode.id,
+                text: '',
+            }
+            toolState.tool = {
+                kind: ToolKind.Text,
+                tempObjectMap: {
+                    [nextNode.id]: nextNode,
+                    [nextText.id]: nextText,
+                },
+                nextObjectID: nextText.id,
+            }
+            return true;
+        }
+
         default:
             return false;
         }
+
+    case ToolActionKind.UpdateNextText:
+        switch (toolState.tool.kind) {
+        case ToolKind.Text:
+            const textObj = toolState.tool.tempObjectMap[toolState.tool.nextObjectID]
+            if (!textObj || textObj.kind !== ObjectKind.Text) {
+                return false
+            }
+            const pointObj = toolState.tool.tempObjectMap[textObj.point]
+            if (!pointObj || pointObj.kind !== ObjectKind.Node) {
+                return false
+            }
+            textObj.text = action.text
+            pointObj.point = action.point
+            return true
+        }
+        return false
 
     case ToolActionKind.UpdateMousePoint:
         toolState.mousePoint = action.point;
@@ -855,6 +928,18 @@ function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<Data
                 point: event.point,
             });
             break;
+        case ToolKind.Text: {
+            const textObj = toolState.tool.tempObjectMap[toolState.tool.nextObjectID]
+            if (!textObj || textObj.kind !== ObjectKind.Text) {
+                break
+            }
+            toolActions.push({
+                kind: ToolActionKind.UpdateNextText,
+                text: textObj.text,
+                point: event.point
+            })
+            break
+        }
         }
 
         break;
@@ -921,6 +1006,20 @@ function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<Data
                 point: event.point,
             });
             break;
+
+        case ToolKind.Text: {
+            toolActions.push({
+                kind: ToolActionKind.SelectTool,
+                tool: ToolKind.Selector
+            })
+
+            dataActions.push({
+                id: generateID(),
+                kind: DataActionKind.AddObject,
+                map: toolState.tool.tempObjectMap,
+            })
+            break
+        }
         }
 
         break;
@@ -966,6 +1065,21 @@ function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<Data
 
     case EventKind.KeyUp:
         break;
+
+    case EventKind.SelectTextTool:
+        toolActions.push({
+            kind: ToolActionKind.SelectTool,
+            tool: ToolKind.Text,
+        })
+        break
+
+    case EventKind.SetTextValue:
+        toolActions.push({
+            kind: ToolActionKind.UpdateNextText,
+            text: event.text,
+            point: toolState.mousePoint,
+        })
+        break
 
     case EventKind.AddPerpendicularConstraint:
         switch (toolState.tool.kind) {
