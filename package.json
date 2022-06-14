@@ -10,6 +10,7 @@
     "@types/node": "^16.7.13",
     "@types/react": "^18.0.0",
     "@types/react-dom": "^18.0.0",
+    "katex": "^0.16.0",
     "ml-matrix": "^6.10.1",
     "react": "^18.1.0",
     "react-dom": "^18.1.0",
@@ -40,5 +41,8 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
+  },
+  "devDependencies": {
+    "@types/katex": "^0.14.0"
   }
 }

@@ -701,7 +701,7 @@ function newtonSolve(x: number[], consFns: ((x: number[]) => number)[], jacFns: 
         }
     }
 
-    for (let i = 0; i < 10; ++i) {
+    for (let i = 0; i < 100; ++i) {
         evalJ(x, J)
         evalF(x, F)
 

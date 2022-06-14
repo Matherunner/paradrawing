@@ -1,4 +1,5 @@
 import React, { CSSProperties, PropsWithChildren } from 'react';
+import katex from 'katex';
 import styles from './App.module.css';
 import { DataAction, Drawing, EventKind, ObjectKind, StateChangeListener, ToolKind } from './canvas';
 
@@ -190,6 +191,23 @@ function CommandList(props: PropsWithChildren<CommandListProps>) {
   // )
 }
 
+interface KatexWrapperProps {
+  text: string,
+}
+
+function KatexWrapper(props: PropsWithChildren<KatexWrapperProps>) {
+  const elemRef = React.useRef<HTMLDivElement>(null)
+
+  React.useEffect(() => {
+    if (!elemRef.current) {
+      return
+    }
+    katex.render(props.text, elemRef.current)
+  }, [props.text])
+
+  return <div ref={elemRef}></div>
+}
+
 interface DrawingWrapperProps {
   dispatch: React.Dispatch<ControllerAction>,
   drawing: Drawing,
@@ -379,8 +397,15 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
         if (selected) {
           stroke = 'red'
         }
+
+        // katex.render('blah', )
+
         svgs.push(<circle key={pointObj.id} cx={pointObj.point[0]} cy={pointObj.point[1]} r={3} fill="none" strokeWidth={1} stroke={stroke} />)
-        svgs.push(<text key={v.id} x={pointObj.point[0]} y={pointObj.point[1]}>{v.text}</text>)
+        svgs.push(
+          <foreignObject key={v.id} x={pointObj.point[0]} y={pointObj.point[1]} width={1} height={1} overflow="visible">
+            <KatexWrapper text={v.text} />
+          </foreignObject>
+        )
       }
       break
     }
