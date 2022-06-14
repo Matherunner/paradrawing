@@ -1,3 +1,5 @@
+import { Matrix, SingularValueDecomposition } from 'ml-matrix';
+
 export type Vec2D = [number, number];
 
 export enum ConstraintKind {
@@ -6,6 +8,8 @@ export enum ConstraintKind {
     Distance,
     Angle,
     Coincident,
+    Horizontal,
+    Vertical,
 }
 
 // High level constraint. Not including implicit constraints like a line is made up of two points at a fixed distance
@@ -19,6 +23,25 @@ export type Constraint =
         kind: ConstraintKind.Parallel,
         line1: ObjectID,
         line2: ObjectID,
+    } |
+    {
+        kind: ConstraintKind.Coincident,
+        object1: ObjectID,
+        object2: ObjectID,
+    } |
+    {
+        kind: ConstraintKind.Horizontal,
+        object: ObjectID,
+    } |
+    {
+        kind: ConstraintKind.Vertical,
+        object: ObjectID,
+    } |
+    {
+        kind: ConstraintKind.Distance,
+        distance: number,
+        object1: ObjectID,
+        object2?: ObjectID,
     }
 
 export enum EventKind {
@@ -27,6 +50,15 @@ export enum EventKind {
     MouseUp,
     KeyDown,
     KeyUp,
+
+    AddPerpendicularConstraint,
+    AddCoincidentConstraint,
+    AddHorizontalConstraint,
+    AddVerticalConstraint,
+    AddDistanceConstraint,
+
+    SelectTextTool,
+    SetTextValue,
 }
 
 export type Event =
@@ -50,20 +82,50 @@ export type Event =
     {
         kind: EventKind.KeyUp,
         key: string,
+    } |
+    {
+        kind: EventKind.AddPerpendicularConstraint,
+    } |
+    {
+        kind: EventKind.AddCoincidentConstraint,
+    } |
+    {
+        kind: EventKind.AddHorizontalConstraint,
+    } |
+    {
+        kind: EventKind.AddDistanceConstraint,
+        distance: number,
+    } |
+    {
+        kind: EventKind.AddVerticalConstraint,
+    } |
+    {
+        kind: EventKind.SelectTextTool,
+    } |
+    {
+        kind: EventKind.SetTextValue,
+        text: string,
     }
 
 export enum ToolKind {
     Selector,
     Pen,
+    Text,
 }
 
 export enum ToolActionKind {
+    UpdateMousePoint,
+    SelectTool,
+
     AddNode,
     UpdateNextNode,
-    SelectTool,
+
+    AddText,
+    UpdateNextText,
+
     CommitPen,
-    UpdateMousePoint,
     AddHistory,
+
     SelectObject,
     DeselectObject,
 }
@@ -99,6 +161,11 @@ type ToolAction =
         tool: ToolKind,
     } |
     {
+        kind: ToolActionKind.UpdateNextText,
+        text: string,
+        point: Vec2D,
+    } |
+    {
         kind: ToolActionKind.UpdateMousePoint,
         point: Vec2D,
     } |
@@ -125,6 +192,11 @@ type Tool =
         tempObjectMap: ObjectMap,
         tempObjectID: ObjectID,
         nextObjectID: ObjectID,
+    } |
+    {
+        kind: ToolKind.Text,
+        tempObjectMap: ObjectMap,
+        nextObjectID: ObjectID,
     }
 
 interface ActionHistory {
@@ -142,6 +214,7 @@ export enum ObjectKind {
     Line,
     Path,
     ControlPoint,
+    Text,
 }
 
 type ObjectID = number;
@@ -162,6 +235,11 @@ type CanvasObject = {
         kind: ObjectKind.Path,
         points: ObjectID[],
         lines: ObjectID[],
+    } |
+    {
+        kind: ObjectKind.Text
+        point: ObjectID,
+        text: string,
     }
 )
 
@@ -187,12 +265,50 @@ const generateID = (() => {
     }
 })();
 
+function vecMulX(a: number[], m: number) {
+    for (let i = 0; i < a.length; ++i) {
+        a[i] *= m
+    }
+}
+
+function vecAddX(a: number[], b: number[]) {
+    for (let i = 0; i < a.length; ++i) {
+        a[i] += b[i]
+    }
+}
+
 function vecSub(a: Vec2D, b: Vec2D): Vec2D {
     return [a[0] - b[0], a[1] - b[1]]
 }
 
+function vecSubX(a: number[], b: number[]) {
+    for (let i = 0; i < a.length; ++i) {
+        a[i] -= b[i]
+    }
+}
+
 function vecDot(a: Vec2D, b: Vec2D): number {
     return a[0] * b[0] + a[1] * b[1]
+}
+
+function vecDotX(a: number[], b: number[]): number {
+    let sum = 0;
+    for (let i = 0; i < a.length; ++i) {
+        sum += a[i] * b[i]
+    }
+    return sum
+}
+
+function vecCopyX(a: number[], b: number[]) {
+    for (let i = 0; i < a.length; ++i) {
+        a[i] = b[i]
+    }
+}
+
+function hitNode(p: Vec2D, tol: number, mouse: Vec2D): boolean {
+    const r = vecSub(mouse, p);
+    const normSq = vecDot(r, r);
+    return normSq < tol * tol
 }
 
 function hitLineSegment(a: Vec2D, b: Vec2D, tol: number, mouse: Vec2D): boolean {
@@ -383,40 +499,253 @@ function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
 
         case ConstraintKind.Parallel:
             break;
-        }
-    }
 
-    const newX = new Array(x.length).fill(0);
-    const G = new Array(consFns.length).fill(0);
-
-    const grad = new Array(consFns.length);
-    for (let i = 0; i < consFns.length; ++i) {
-        grad[i] = new Array(x.length).fill(0);
-    }
-
-    const gamma = 0.000001;
-
-    for (let i = 0; i < 1000; ++i) {
-        for (let j = 0; j < jacFns.length; ++j) {
-            jacFns[j](x, grad[j])
-        }
-        for (let j = 0; j < G.length; ++j) {
-            G[j] = consFns[j](x)
-        }
-        for (let j = 0; j < newX.length; ++j) {
-            newX[j] = 0
-            for (let k = 0; k < grad.length; ++k) {
-                newX[j] += grad[k][j] * G[k]
+        case ConstraintKind.Distance: {
+            const obj1 = objects[cons.object1]
+            const obj2 = typeof cons.object2 === 'number' ? objects[cons.object2] : undefined
+            if (!obj1) {
+                continue
             }
+
+            if (!obj2 && obj1.kind !== ObjectKind.Line) {
+                continue
+            }
+
+            if (obj2 && (obj1.kind !== ObjectKind.Node || obj2?.kind !== ObjectKind.Node)) {
+                continue
+            }
+
+            const p1 = obj1.kind === ObjectKind.Line ? obj1.point1 : obj1.id
+            const p2 = obj1.kind === ObjectKind.Line ? obj1.point2 : obj2 ? obj2.id : -1
+
+            addVariable(p1, 0)
+            addVariable(p1, 1)
+            addVariable(p2, 0)
+            addVariable(p2, 1)
+
+            consFns.push((x) => {
+                const [, p1x] = getVariable(x, p1, 0)
+                const [, p1y] = getVariable(x, p1, 1)
+                const [, p2x] = getVariable(x, p2, 0)
+                const [, p2y] = getVariable(x, p2, 1)
+                const dx = p2x - p1x
+                const dy = p2y - p1y
+                return dx * dx + dy * dy - cons.distance * cons.distance
+            })
+
+            jacFns.push((x, grad) => {
+                const [p1xCol, p1x] = getVariable(x, p1, 0)
+                const [p1yCol, p1y] = getVariable(x, p1, 1)
+                const [p2xCol, p2x] = getVariable(x, p2, 0)
+                const [p2yCol, p2y] = getVariable(x, p2, 1)
+                grad[p1xCol] = -2 * (p2x - p1x)
+                grad[p1yCol] = -2 * (p2y - p1y)
+                grad[p2xCol] = 2 * (p2x - p1x)
+                grad[p2yCol] = 2 * (p2y - p1y)
+            })
+
+            break
         }
-        for (let j = 0; j < x.length; ++j) {
-            x[j] -= gamma * newX[j]
+
+        case ConstraintKind.Horizontal:
+            const obj = objects[cons.object]
+            if (!obj || obj.kind !== ObjectKind.Line) {
+                // TODO: this can also be applied to two points, not just a line
+                continue
+            }
+
+            addVariable(obj.point1, 1)
+            addVariable(obj.point2, 1)
+
+            consFns.push((x) => {
+                const [, p1y] = getVariable(x, obj.point1, 1)
+                const [, p2y] = getVariable(x, obj.point2, 1)
+                return p1y - p2y
+            })
+
+            jacFns.push((x, grad) => {
+                const [p1yCol] = getVariable(x, obj.point1, 1)
+                const [p2yCol] = getVariable(x, obj.point2, 1)
+                grad[p1yCol] = 1
+                grad[p2yCol] = -1
+            })
+
+            break;
+
+        case ConstraintKind.Vertical: {
+            const obj = objects[cons.object]
+            if (!obj || obj.kind !== ObjectKind.Line) {
+                continue
+            }
+
+            addVariable(obj.point1, 0)
+            addVariable(obj.point2, 0)
+
+            consFns.push((x) => {
+                const [, p1x] = getVariable(x, obj.point1, 0)
+                const [, p2x] = getVariable(x, obj.point2, 0)
+                return p1x - p2x
+            })
+
+            jacFns.push((x, grad) => {
+                const [p1xCol] = getVariable(x, obj.point1, 0)
+                const [p2xCol] = getVariable(x, obj.point2, 0)
+                grad[p1xCol] = 1
+                grad[p2xCol] = -1
+            })
+
+            break
         }
-        
+
+        case ConstraintKind.Coincident:
+            // Two possibilities: both object1 and object2 are points, or one of them is a point and the other a line
+            const obj1 = objects[cons.object1];
+            const obj2 = objects[cons.object2];
+            if (!obj1 || !obj2) {
+                continue
+            }
+
+            if (obj1.kind === ObjectKind.Node && obj2.kind === ObjectKind.Node) {
+                // Two points coincident, two equations in p1 = p2
+
+                // FIXME: convergence is too slow, maybe just replace the point ID in the line obj instead of doing it here?
+
+                addVariable(obj1.id, 0)
+                addVariable(obj1.id, 1)
+                addVariable(obj2.id, 0)
+                addVariable(obj2.id, 1)
+
+                consFns.push((x) => {
+                    const [, p1x] = getVariable(x, obj1.id, 0)
+                    const [, p2x] = getVariable(x, obj2.id, 0)
+                    return p1x - p2x
+                })
+
+                consFns.push((x) => {
+                    const [, p1y] = getVariable(x, obj1.id, 1)
+                    const [, p2y] = getVariable(x, obj2.id, 1)
+                    return p1y - p2y
+                })
+
+                jacFns.push((x, grad) => {
+                    const [p1xCol,] = getVariable(x, obj1.id, 0)
+                    const [p1yCol,] = getVariable(x, obj1.id, 1)
+                    const [p2xCol,] = getVariable(x, obj2.id, 0)
+                    const [p2yCol,] = getVariable(x, obj2.id, 1)
+                    grad[p1xCol] = 1
+                    grad[p1yCol] = 0
+                    grad[p2xCol] = -1
+                    grad[p2yCol] = 0
+                })
+
+                jacFns.push((x, grad) => {
+                    const [p1xCol,] = getVariable(x, obj1.id, 0)
+                    const [p1yCol,] = getVariable(x, obj1.id, 1)
+                    const [p2xCol,] = getVariable(x, obj2.id, 0)
+                    const [p2yCol,] = getVariable(x, obj2.id, 1)
+                    grad[p1xCol] = 0
+                    grad[p1yCol] = 1
+                    grad[p2xCol] = 0
+                    grad[p2yCol] = -1
+                })
+            } else {
+                let lineObj;
+                let pointObj;
+                if (obj1.kind === ObjectKind.Line && obj2.kind === ObjectKind.Node) {
+                    lineObj = obj1
+                    pointObj = obj2
+                } else if (obj1.kind === ObjectKind.Node && obj2.kind === ObjectKind.Line) {
+                    lineObj = obj2
+                    pointObj = obj1
+                } else {
+                    continue
+                }
+
+                const a1 = lineObj.point1
+                const a2 = lineObj.point2
+                const p = pointObj.id
+
+                addVariable(a1, 0)
+                addVariable(a1, 1)
+                addVariable(a2, 0)
+                addVariable(a2, 1)
+                addVariable(p, 0)
+                addVariable(p, 1)
+
+                consFns.push((x) => {
+                    const [,a1x] = getVariable(x, a1, 0)
+                    const [,a1y] = getVariable(x, a1, 1)
+                    const [,a2x] = getVariable(x, a2, 0)
+                    const [,a2y] = getVariable(x, a2, 1)
+                    const [,px] = getVariable(x, p, 0)
+                    const [,py] = getVariable(x, p, 1)
+                    const v1x = a2x - a1x
+                    const v1y = a2y - a1y
+                    const v2x = px - a1x
+                    const v2y = py - a1y
+                    return v1x * v2y - v1y * v2x
+                })
+
+                jacFns.push((x, grad) => {
+                    const [a1xCol, a1x] = getVariable(x, a1, 0)
+                    const [a1yCol, a1y] = getVariable(x, a1, 1)
+                    const [a2xCol, a2x] = getVariable(x, a2, 0)
+                    const [a2yCol, a2y] = getVariable(x, a2, 1)
+                    const [pxCol, px] = getVariable(x, p, 0)
+                    const [pyCol, py] = getVariable(x, p, 1)
+                    grad[a1xCol] = a1y - py
+                    grad[a1yCol] = a2y - a1y
+                    grad[a2xCol] = py - a1y
+                    grad[a2yCol] = a1x - px
+                    grad[pxCol] = a1y - a2y
+                    grad[pyCol] = a2x - a1x
+                })
+            }
+
+            break
+        }
     }
+
+    newtonSolve(x, consFns, jacFns)
+
+    // gradientDescend(x, consFns, jacFns);
 
     for (const fn of writeResults) {
         fn(x)
+    }
+}
+
+function newtonSolve(x: number[], consFns: ((x: number[]) => number)[], jacFns: ((x: number[], grad: number[]) => void)[]) {
+    const J = new Matrix(jacFns.length, x.length)
+    const F = new Matrix(consFns.length, 1)
+
+    // Intermediate storage
+    const Jrow = new Array<number>(J.columns).fill(0)
+
+    const evalJ = (x: number[], J: Matrix) => {
+        for (let r = 0; r < J.rows; ++r) {
+            Jrow.fill(0)
+            jacFns[r](x, Jrow)
+            J.setRow(r, Jrow)
+        }
+    }
+
+    const evalF = (x: number[], F: Matrix) => {
+        for (let r = 0; r < F.rows; ++r) {
+            F.set(r, 0, -consFns[r](x))
+        }
+    }
+
+    for (let i = 0; i < 100; ++i) {
+        evalJ(x, J)
+        evalF(x, F)
+
+        const svd = new SingularValueDecomposition(J, { autoTranspose: true })
+        const sol = svd.solve(F)
+
+        for (let r = 0; r < x.length; ++r) {
+            x[r] += sol.get(r, 0)
+        }
     }
 }
 
@@ -543,9 +872,49 @@ function executeToolAction(toolState: ToolState, action: Readonly<ToolAction>): 
             }
             return true;
 
+        case ToolKind.Text: {
+            const nextNode: CanvasObject = {
+                id: generateID(),
+                kind: ObjectKind.Node,
+                point: toolState.mousePoint,
+            }
+            const nextText: CanvasObject = {
+                id: generateID(),
+                kind: ObjectKind.Text,
+                point: nextNode.id,
+                text: '',
+            }
+            toolState.tool = {
+                kind: ToolKind.Text,
+                tempObjectMap: {
+                    [nextNode.id]: nextNode,
+                    [nextText.id]: nextText,
+                },
+                nextObjectID: nextText.id,
+            }
+            return true;
+        }
+
         default:
             return false;
         }
+
+    case ToolActionKind.UpdateNextText:
+        switch (toolState.tool.kind) {
+        case ToolKind.Text:
+            const textObj = toolState.tool.tempObjectMap[toolState.tool.nextObjectID]
+            if (!textObj || textObj.kind !== ObjectKind.Text) {
+                return false
+            }
+            const pointObj = toolState.tool.tempObjectMap[textObj.point]
+            if (!pointObj || pointObj.kind !== ObjectKind.Node) {
+                return false
+            }
+            textObj.text = action.text
+            pointObj.point = action.point
+            return true
+        }
+        return false
 
     case ToolActionKind.UpdateMousePoint:
         toolState.mousePoint = action.point;
@@ -594,6 +963,18 @@ function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<Data
                 point: event.point,
             });
             break;
+        case ToolKind.Text: {
+            const textObj = toolState.tool.tempObjectMap[toolState.tool.nextObjectID]
+            if (!textObj || textObj.kind !== ObjectKind.Text) {
+                break
+            }
+            toolActions.push({
+                kind: ToolActionKind.UpdateNextText,
+                text: textObj.text,
+                point: event.point
+            })
+            break
+        }
         }
 
         break;
@@ -608,7 +989,15 @@ function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<Data
                 }
 
                 switch (obj.kind) {
-                    case ObjectKind.Line:
+                case ObjectKind.Node:
+                    const hit = hitNode(obj.point, 15, event.point)
+                    if (hit) {
+                        hitObjID = obj.id;
+                        break loop;
+                    }
+                    break;
+
+                case ObjectKind.Line:
                     const point1Obj = dataState.objects[obj.point1]
                     const point2Obj = dataState.objects[obj.point2]
                     if (point1Obj && point2Obj && point1Obj.kind === ObjectKind.Node && point2Obj.kind === ObjectKind.Node) {
@@ -652,6 +1041,20 @@ function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<Data
                 point: event.point,
             });
             break;
+
+        case ToolKind.Text: {
+            toolActions.push({
+                kind: ToolActionKind.SelectTool,
+                tool: ToolKind.Selector
+            })
+
+            dataActions.push({
+                id: generateID(),
+                kind: DataActionKind.AddObject,
+                map: toolState.tool.tempObjectMap,
+            })
+            break
+        }
         }
 
         break;
@@ -661,29 +1064,6 @@ function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<Data
 
     case EventKind.KeyDown:
         switch (event.key) {
-        case 'c':
-            // FIXME: temporary hardcoded constraint
-            switch (toolState.tool.kind) {
-            case ToolKind.Selector:
-                if (toolState.tool.selectedObjects.size !== 2) {
-                    console.log('must select 2 objects to add constraints')
-                    break;
-                }
-
-                const objectIDs = Array.from(toolState.tool.selectedObjects);
-
-                dataActions.push({
-                    id: generateID(),
-                    kind: DataActionKind.AddConstraint,
-                    constraint: {
-                        kind: ConstraintKind.Perpendicular,
-                        line1: objectIDs[0],
-                        line2: objectIDs[1],
-                    }
-                })
-                break;
-            }
-            break;
         case 'p':
             toolActions.push({
                 kind: ToolActionKind.SelectTool,
@@ -720,6 +1100,136 @@ function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<Data
 
     case EventKind.KeyUp:
         break;
+
+    case EventKind.SelectTextTool:
+        toolActions.push({
+            kind: ToolActionKind.SelectTool,
+            tool: ToolKind.Text,
+        })
+        break
+
+    case EventKind.SetTextValue:
+        toolActions.push({
+            kind: ToolActionKind.UpdateNextText,
+            text: event.text,
+            point: toolState.mousePoint,
+        })
+        break
+
+    case EventKind.AddPerpendicularConstraint:
+        switch (toolState.tool.kind) {
+        case ToolKind.Selector:
+            if (toolState.tool.selectedObjects.size !== 2) {
+                console.log('must select 2 objects to add constraints')
+                break;
+            }
+
+            const objectIDs = Array.from(toolState.tool.selectedObjects);
+
+            dataActions.push({
+                id: generateID(),
+                kind: DataActionKind.AddConstraint,
+                constraint: {
+                    kind: ConstraintKind.Perpendicular,
+                    line1: objectIDs[0],
+                    line2: objectIDs[1],
+                }
+            })
+            break;
+        }
+        break;
+
+    case EventKind.AddCoincidentConstraint:
+        switch (toolState.tool.kind) {
+        case ToolKind.Selector:
+            if (toolState.tool.selectedObjects.size !== 2) {
+                console.log('must select 2 objects to add constraints')
+                break;
+            }
+
+            const objectIDs = Array.from(toolState.tool.selectedObjects)
+
+            dataActions.push({
+                id: generateID(),
+                kind: DataActionKind.AddConstraint,
+                constraint: {
+                    kind: ConstraintKind.Coincident,
+                    object1: objectIDs[0],
+                    object2: objectIDs[1],
+                }
+            })
+            break;
+        }
+        break;
+
+    case EventKind.AddHorizontalConstraint:
+        switch (toolState.tool.kind) {
+        case ToolKind.Selector:
+            if (toolState.tool.selectedObjects.size !== 1) {
+                console.log('must select 1 object for the horizontal constraint')
+                break
+            }
+
+            const objectIDs = Array.from(toolState.tool.selectedObjects)
+
+            dataActions.push({
+                id: generateID(),
+                kind: DataActionKind.AddConstraint,
+                constraint: {
+                    kind: ConstraintKind.Horizontal,
+                    object: objectIDs[0],
+                }
+            })
+            break;
+        }
+        break;
+
+    case EventKind.AddVerticalConstraint:
+        switch (toolState.tool.kind) {
+        case ToolKind.Selector:
+            if (toolState.tool.selectedObjects.size !== 1) {
+                console.log('must select 1 object for the vertical constraint')
+                break
+            }
+
+            const objectIDs = Array.from(toolState.tool.selectedObjects)
+
+            dataActions.push({
+                id: generateID(),
+                kind: DataActionKind.AddConstraint,
+                constraint: {
+                    kind: ConstraintKind.Vertical,
+                    object: objectIDs[0]
+                }
+            })
+            break
+        }
+        break
+
+    case EventKind.AddDistanceConstraint:
+        switch (toolState.tool.kind) {
+        case ToolKind.Selector:
+            if (toolState.tool.selectedObjects.size !== 1 && toolState.tool.selectedObjects.size !== 2) {
+                console.log('must select 1 line, or two points')
+                break
+            }
+
+            const objectIDs = Array.from(toolState.tool.selectedObjects)
+
+            dataActions.push({
+                id: generateID(),
+                kind: DataActionKind.AddConstraint,
+                constraint: {
+                    kind: ConstraintKind.Distance,
+                    distance: event.distance,
+                    object1: objectIDs[0],
+                    object2: objectIDs[1],
+                }
+            })
+
+            break
+        }
+        break
     }
 
     for (const action of dataActions) {

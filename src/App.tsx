@@ -153,6 +153,8 @@ function toolTypeToString(type: ToolKind): string {
     return "Selector"
   case ToolKind.Pen:
     return "Pen"
+  case ToolKind.Text:
+    return "Text"
   }
 }
 
@@ -189,8 +191,26 @@ function CommandList(props: PropsWithChildren<CommandListProps>) {
   // )
 }
 
+interface KatexWrapperProps {
+  text: string,
+}
+
+function KatexWrapper(props: PropsWithChildren<KatexWrapperProps>) {
+  const elemRef = React.useRef<HTMLDivElement>(null)
+
+  React.useEffect(() => {
+    if (!elemRef.current) {
+      return
+    }
+    katex.render(props.text, elemRef.current)
+  }, [props.text])
+
+  return <div ref={elemRef}></div>
+}
+
 interface DrawingWrapperProps {
   dispatch: React.Dispatch<ControllerAction>,
+  drawing: Drawing,
 }
 
 function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
@@ -198,11 +218,7 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
 
   const [, setChangeCounter] = React.useState(0);
 
-  const objRef = React.useRef<Drawing>();
-  if (!objRef.current) {
-    objRef.current = new Drawing();
-  }
-  const drawingRef = objRef.current;
+  const drawingRef = props.drawing;
 
   const updateGlobalState = () => {
     props.dispatch({
@@ -324,6 +340,18 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
   case ToolKind.Selector:
     selectedObjects = tool.selectedObjects
     break;
+
+  case ToolKind.Text: {
+    const nextObj = tool.tempObjectMap[tool.nextObjectID]
+    if (nextObj && nextObj.kind === ObjectKind.Text) {
+      const pointObj = tool.tempObjectMap[nextObj.point]
+      if (pointObj && pointObj.kind === ObjectKind.Node) {
+        svgs.push(<circle key={pointObj.id} cx={pointObj.point[0]} cy={pointObj.point[1]} r={3} fill="none" strokeWidth={1} stroke="green" />)
+        svgs.push(<text key={nextObj.id} x={pointObj.point[0]} y={pointObj.point[1]}>{nextObj.text}</text>)
+      }
+    }
+    break;
+  }
   }
 
   const dataState = drawingRef.getDataState();
@@ -336,7 +364,12 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
       for (const pointID of v.points) {
         const pointObj = dataState.objects[pointID];
         if (pointObj && pointObj.kind === ObjectKind.Node) {
-          svgs.push(<circle key={pointID} cx={pointObj.point[0]} cy={pointObj.point[1]} r={3} fill="none" strokeWidth={1} stroke="black" />);
+          const selected = selectedObjects && selectedObjects.has(pointID)
+          let stroke = 'black'
+          if (selected) {
+            stroke = 'red'
+          }
+          svgs.push(<circle key={pointID} cx={pointObj.point[0]} cy={pointObj.point[1]} r={3} fill="none" strokeWidth={1} stroke={stroke} />);
         }
       }
       for (const lineID of v.lines) {
@@ -346,15 +379,36 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
           const point2Obj = dataState.objects[lineObj.point2];
           if (point1Obj && point2Obj && point1Obj.kind === ObjectKind.Node && point2Obj.kind === ObjectKind.Node) {
             const selected = selectedObjects && selectedObjects.has(lineID);
-            let stroke = "black"
+            let stroke = 'black'
             if (selected) {
-              stroke = "red"
+              stroke = 'red'
             }
             svgs.push(<line key={lineID} x1={point1Obj.point[0]} y1={point1Obj.point[1]} x2={point2Obj.point[0]} y2={point2Obj.point[1]} strokeWidth={1} stroke={stroke} />);
           }
         }
       }
       break;
+
+    case ObjectKind.Text: {
+      const pointObj = dataState.objects[v.point]
+      if (pointObj && pointObj.kind === ObjectKind.Node) {
+        const selected = selectedObjects && selectedObjects.has(pointObj.id)
+        let stroke = 'black'
+        if (selected) {
+          stroke = 'red'
+        }
+
+        // katex.render('blah', )
+
+        svgs.push(<circle key={pointObj.id} cx={pointObj.point[0]} cy={pointObj.point[1]} r={3} fill="none" strokeWidth={1} stroke={stroke} />)
+        svgs.push(
+          <foreignObject key={v.id} x={pointObj.point[0]} y={pointObj.point[1]} width={1} height={1} overflow="visible">
+            <KatexWrapper text={v.text} />
+          </foreignObject>
+        )
+      }
+      break
+    }
     }
   }
 
@@ -384,6 +438,16 @@ interface CanvasProps {
 function Canvas(props: PropsWithChildren<CanvasProps>) {
   const [state, dispatch] = React.useReducer(controllerReducer, initialControllerState);
 
+  const [distanceConsValue, setDistanceConsValue] = React.useState('100')
+
+  const [textValue, setTextValue] = React.useState('')
+
+  const objRef = React.useRef<Drawing>();
+  if (!objRef.current) {
+    objRef.current = new Drawing();
+  }
+  const drawingRef = objRef.current;
+
   return (
     <div style={{ ...props.style, flexDirection: 'column', display: 'flex' }}>
       <Toolbar state={state} />
@@ -391,7 +455,64 @@ function Canvas(props: PropsWithChildren<CanvasProps>) {
         <div style={{ width: 300, backgroundColor: 'lightblue', display: 'flex', flexDirection: 'column' }}>
           <CommandList state={state} />
         </div>
-        <DrawingWrapper dispatch={dispatch} />
+        <DrawingWrapper drawing={drawingRef} dispatch={dispatch} />
+        <div style={{ width: 300, backgroundColor: 'lightblue' }}>
+          <div>
+            <p>Constraint</p>
+            <button onClick={(e) => {
+              e.preventDefault()
+              drawingRef.sendEvent({
+                kind: EventKind.AddPerpendicularConstraint,
+              })
+            }}>Perpendicular</button>
+            <button>Parallel</button>
+            <button onClick={(e) => {
+              e.preventDefault()
+              drawingRef.sendEvent({
+                kind: EventKind.AddCoincidentConstraint,
+              })
+            }}>Coincident</button>
+            <button onClick={(e) => {
+              e.preventDefault()
+              drawingRef.sendEvent({
+                kind: EventKind.AddHorizontalConstraint,
+              })
+            }}>Horizontal</button>
+            <button onClick={(e) => {
+              e.preventDefault()
+              drawingRef.sendEvent({
+                kind: EventKind.AddVerticalConstraint,
+              })
+            }}>Vertical</button>
+            <input type="text" value={distanceConsValue} onChange={(e) => {
+              setDistanceConsValue(e.target.value)
+            }} />
+            <button onClick={(e) => {
+              e.preventDefault()
+              drawingRef.sendEvent({
+                kind: EventKind.AddDistanceConstraint,
+                distance: +distanceConsValue,
+              })
+            }}>Distance</button>
+          </div>
+
+          <div>
+            <p>Text</p>
+            <button onClick={(e) => {
+              e.preventDefault()
+              drawingRef.sendEvent({
+                kind: EventKind.SelectTextTool
+              })
+            }}>Add Text</button>
+            <input type="text" onChange={(e) => {
+              setTextValue(e.target.value)
+              drawingRef.sendEvent({
+                kind: EventKind.SetTextValue,
+                text: e.target.value,
+              })
+            }} value={textValue} />
+          </div>
+        </div>
       </div>
     </div>
   );
