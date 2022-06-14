@@ -9,6 +9,7 @@ export enum ConstraintKind {
     Angle,
     Coincident,
     Horizontal,
+    Vertical,
 }
 
 // High level constraint. Not including implicit constraints like a line is made up of two points at a fixed distance
@@ -33,6 +34,10 @@ export type Constraint =
         object: ObjectID,
     } |
     {
+        kind: ConstraintKind.Vertical,
+        object: ObjectID,
+    } |
+    {
         kind: ConstraintKind.Distance,
         distance: number,
         object1: ObjectID,
@@ -49,6 +54,7 @@ export enum EventKind {
     AddPerpendicularConstraint,
     AddCoincidentConstraint,
     AddHorizontalConstraint,
+    AddVerticalConstraint,
     AddDistanceConstraint,
 
     SelectTextTool,
@@ -89,6 +95,9 @@ export type Event =
     {
         kind: EventKind.AddDistanceConstraint,
         distance: number,
+    } |
+    {
+        kind: EventKind.AddVerticalConstraint,
     } |
     {
         kind: EventKind.SelectTextTool,
@@ -541,6 +550,7 @@ function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
         case ConstraintKind.Horizontal:
             const obj = objects[cons.object]
             if (!obj || obj.kind !== ObjectKind.Line) {
+                // TODO: this can also be applied to two points, not just a line
                 continue
             }
 
@@ -561,6 +571,31 @@ function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
             })
 
             break;
+
+        case ConstraintKind.Vertical: {
+            const obj = objects[cons.object]
+            if (!obj || obj.kind !== ObjectKind.Line) {
+                continue
+            }
+
+            addVariable(obj.point1, 0)
+            addVariable(obj.point2, 0)
+
+            consFns.push((x) => {
+                const [, p1x] = getVariable(x, obj.point1, 0)
+                const [, p2x] = getVariable(x, obj.point2, 0)
+                return p1x - p2x
+            })
+
+            jacFns.push((x, grad) => {
+                const [p1xCol] = getVariable(x, obj.point1, 0)
+                const [p2xCol] = getVariable(x, obj.point2, 0)
+                grad[p1xCol] = 1
+                grad[p2xCol] = -1
+            })
+
+            break
+        }
 
         case ConstraintKind.Coincident:
             // Two possibilities: both object1 and object2 are points, or one of them is a point and the other a line
@@ -1148,6 +1183,28 @@ function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<Data
             break;
         }
         break;
+
+    case EventKind.AddVerticalConstraint:
+        switch (toolState.tool.kind) {
+        case ToolKind.Selector:
+            if (toolState.tool.selectedObjects.size !== 1) {
+                console.log('must select 1 object for the vertical constraint')
+                break
+            }
+
+            const objectIDs = Array.from(toolState.tool.selectedObjects)
+
+            dataActions.push({
+                id: generateID(),
+                kind: DataActionKind.AddConstraint,
+                constraint: {
+                    kind: ConstraintKind.Vertical,
+                    object: objectIDs[0]
+                }
+            })
+            break
+        }
+        break
 
     case EventKind.AddDistanceConstraint:
         switch (toolState.tool.kind) {

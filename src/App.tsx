@@ -478,6 +478,12 @@ function Canvas(props: PropsWithChildren<CanvasProps>) {
                 kind: EventKind.AddHorizontalConstraint,
               })
             }}>Horizontal</button>
+            <button onClick={(e) => {
+              e.preventDefault()
+              drawingRef.sendEvent({
+                kind: EventKind.AddVerticalConstraint,
+              })
+            }}>Vertical</button>
             <input type="text" value={distanceConsValue} onChange={(e) => {
               setDistanceConsValue(e.target.value)
             }} />
