@@ -1,7 +1,7 @@
 import React, { CSSProperties, PropsWithChildren } from 'react';
 import katex from 'katex';
 import styles from './App.module.css';
-import { DataAction, Drawing, EventKind, ObjectKind, StateChangeListener, ToolKind } from './canvas';
+import { DataAction, DataState, Drawing, EventKind, ObjectKind, StateChangeListener, ToolKind } from './canvas';
 
 function pathCommandsFromObject(object: Object): string {
   let pathCmds = '';
@@ -189,6 +189,105 @@ function CommandList(props: PropsWithChildren<CommandListProps>) {
   //     {items}
   //   </ul>
   // )
+}
+
+interface SVGPreviewProps {
+  state: DataState,
+  onRender?: (svg: SVGSVGElement) => void,
+  style?: CSSProperties
+  fitToContent?: boolean,
+}
+
+function SVGPreview(props: PropsWithChildren<SVGPreviewProps>) {
+  const [svgWidth, setSVGWidth] = React.useState('100%')
+  const [svgHeight, setSVGHeight] = React.useState('100%')
+  const [svgViewBox, setSVGViewBox] = React.useState<string>()
+
+  const svgRef = React.useRef<SVGSVGElement>(null)
+
+  React.useEffect(() => {
+    if (!props.fitToContent || !svgRef.current) {
+      return
+    }
+
+    // FIXME: this getBBox will cause a reflow, might create performance issues?
+    const bbox = svgRef.current.getBBox({
+      fill: true,
+      stroke: true,
+      markers: true,
+    })
+    setSVGWidth(bbox.width + '')
+    setSVGHeight(bbox.height + '')
+    setSVGViewBox(`${bbox.x} ${bbox.y} ${bbox.width} ${bbox.height}`)
+  })
+
+  React.useEffect(() => {
+    if (!svgRef.current || !props.onRender) {
+      return
+    }
+    props.onRender(svgRef.current)
+  }, [props.onRender])
+
+  const svgs = []
+
+  for (const [, v] of Object.entries(props.state.objects)) {
+    if (!v) {
+      continue;
+    }
+
+    switch (v.kind) {
+    case ObjectKind.Path: {
+      for (const lineID of v.lines) {
+        const lineObj = props.state.objects[lineID];
+        if (lineObj && lineObj.kind === ObjectKind.Line) {
+          const point1Obj = props.state.objects[lineObj.point1];
+          const point2Obj = props.state.objects[lineObj.point2];
+          if (point1Obj && point2Obj && point1Obj.kind === ObjectKind.Node && point2Obj.kind === ObjectKind.Node) {
+            svgs.push(<line key={lineID} x1={point1Obj.point[0]} y1={point1Obj.point[1]} x2={point2Obj.point[0]} y2={point2Obj.point[1]} strokeWidth={1} stroke="black" />);
+          }
+        }
+      }
+      break;
+    }
+
+    case ObjectKind.Text: {
+      const pointObj = props.state.objects[v.point]
+      if (pointObj && pointObj.kind === ObjectKind.Node) {
+        svgs.push(
+          <foreignObject
+            key={v.id}
+            x={pointObj.point[0]}
+            y={pointObj.point[1]}
+            width={1}
+            height={1}
+            overflow="visible"
+          >
+            <div
+              // @ts-expect-error: TS doesn't seem to support xmlns attribute on a DIV
+              xmlns="http://www.w3.org/1999/xhtml"
+            >
+              <KatexWrapper text={v.text} />
+            </div>
+          </foreignObject>
+        )
+      }
+      break
+    }
+    }
+  }
+
+  return (
+    <svg
+      ref={svgRef}
+      width={svgWidth}
+      height={svgHeight}
+      viewBox={svgViewBox}
+      preserveAspectRatio='none'
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      {svgs}
+    </svg>
+  )
 }
 
 interface KatexWrapperProps {
@@ -398,8 +497,6 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
           stroke = 'red'
         }
 
-        // katex.render('blah', )
-
         svgs.push(<circle key={pointObj.id} cx={pointObj.point[0]} cy={pointObj.point[1]} r={3} fill="none" strokeWidth={1} stroke={stroke} />)
         svgs.push(
           <foreignObject key={v.id} x={pointObj.point[0]} y={pointObj.point[1]} width={1} height={1} overflow="visible">
@@ -442,11 +539,15 @@ function Canvas(props: PropsWithChildren<CanvasProps>) {
 
   const [textValue, setTextValue] = React.useState('')
 
+  const [downloadURI, setDownloadURI] = React.useState('')
+
   const objRef = React.useRef<Drawing>();
   if (!objRef.current) {
     objRef.current = new Drawing();
   }
   const drawingRef = objRef.current;
+
+  const previewSVG = React.useRef<SVGSVGElement>();
 
   return (
     <div style={{ ...props.style, flexDirection: 'column', display: 'flex' }}>
@@ -511,6 +612,34 @@ function Canvas(props: PropsWithChildren<CanvasProps>) {
                 text: e.target.value,
               })
             }} value={textValue} />
+          </div>
+
+          <div>
+            <p>Export</p>
+            <button onClick={(e) => {
+              e.preventDefault()
+              if (!previewSVG.current) {
+                return
+              }
+
+              if (downloadURI !== '') {
+                URL.revokeObjectURL(downloadURI)
+              }
+
+              // TODO: maybe should not hardcode the link
+              // The stylesheet is needed for this SVG to work inside an <object> tag in a HTML
+              const header = `<?xml version="1.0" encoding="utf-8"?><?xml-stylesheet type="text/css" href="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/katex.min.css" ?>`
+              const content = `${header}${previewSVG.current.outerHTML}`
+
+              const blob = new Blob([content], { type: 'image/svg+xml' })
+              const url = URL.createObjectURL(blob)
+
+              setDownloadURI(url)
+            }}>Export as SVG</button>
+            <SVGPreview state={drawingRef.getDataState()} onRender={(e) => previewSVG.current = e} fitToContent />
+            {
+              downloadURI ? <a href={downloadURI} download>Download SVG</a> : null
+            }
           </div>
         </div>
       </div>
