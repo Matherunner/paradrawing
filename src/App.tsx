@@ -265,6 +265,7 @@ function SVGPreview(props: PropsWithChildren<SVGPreviewProps>) {
             <div
               // @ts-expect-error: TS doesn't seem to support xmlns attribute on a DIV
               xmlns="http://www.w3.org/1999/xhtml"
+              style={{ whiteSpace: 'nowrap' }}
             >
               <KatexWrapper text={v.text} />
             </div>
