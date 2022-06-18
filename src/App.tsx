@@ -156,6 +156,7 @@ function controllerReducer(state: ControllerState, action: ControllerAction): Co
 
 interface ToolbarProps {
   state: ControllerState,
+  height?: number,
 }
 
 function toolTypeToString(type: ToolKind): string {
@@ -169,14 +170,162 @@ function toolTypeToString(type: ToolKind): string {
   }
 }
 
+const DEFAULT_TOOLBAR_HEIGHT = 40;
+
 function Toolbar(props: PropsWithChildren<ToolbarProps>) {
   const toolboxName = toolTypeToString(props.state.currentToolType);
 
+  const height = props.height ?? DEFAULT_TOOLBAR_HEIGHT
+
   return (
-    <div style={{ flex: "0 0 2em", width: '100%', backgroundColor: '#eeeeff' }}>
+    <div style={{ width: '100%', height, backgroundColor: '#eeeeff', pointerEvents: 'auto' }}>
       <span>{toolboxName}</span>
     </div>
   );
+}
+
+interface LeftSideBarProps {
+  state: ControllerState,
+}
+
+function LeftSideBar(props: PropsWithChildren<LeftSideBarProps>) {
+  return (
+    <div
+      style={{
+        pointerEvents: 'auto',
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        bottom: 0,
+        width: 300,
+        backgroundColor: 'lightblue',
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+    >
+      <CommandList state={props.state} />
+    </div>
+  )
+}
+
+interface RightSideBarProps {
+  state: ControllerState,
+  drawing: Drawing,
+}
+
+function RightSideBar(props: PropsWithChildren<RightSideBarProps>) {
+  const [distanceConsValue, setDistanceConsValue] = React.useState('100')
+
+  const [textValue, setTextValue] = React.useState('')
+
+  const [downloadURI, setDownloadURI] = React.useState('')
+
+  const previewSVG = React.useRef<SVGSVGElement>();
+
+  const drawingRef = props.drawing;
+
+  return (
+    <div style={{ pointerEvents: 'auto', position: 'absolute', top: 0, right: 0, bottom: 0, width: 300, backgroundColor: 'lightgreen' }}>
+      <div>
+        <p>Constraint</p>
+        <button onClick={(e) => {
+          e.preventDefault()
+          drawingRef.sendEvent({
+            kind: EventKind.AddPerpendicularConstraint,
+          })
+        }}>Perpendicular</button>
+        <button>Parallel</button>
+        <button onClick={(e) => {
+          e.preventDefault()
+          drawingRef.sendEvent({
+            kind: EventKind.AddCoincidentConstraint,
+          })
+        }}>Coincident</button>
+        <button onClick={(e) => {
+          e.preventDefault()
+          drawingRef.sendEvent({
+            kind: EventKind.AddHorizontalConstraint,
+          })
+        }}>Horizontal</button>
+        <button onClick={(e) => {
+          e.preventDefault()
+          drawingRef.sendEvent({
+            kind: EventKind.AddVerticalConstraint,
+          })
+        }}>Vertical</button>
+        <input type="text" value={distanceConsValue} onChange={(e) => {
+          setDistanceConsValue(e.target.value)
+        }} />
+        <button onClick={(e) => {
+          e.preventDefault()
+          drawingRef.sendEvent({
+            kind: EventKind.AddDistanceConstraint,
+            distance: +distanceConsValue,
+          })
+        }}>Distance</button>
+      </div>
+
+      <div>
+        <p>Text</p>
+        <button onClick={(e) => {
+          e.preventDefault()
+          drawingRef.sendEvent({
+            kind: EventKind.SelectTextTool
+          })
+        }}>Add Text</button>
+        <input type="text" onChange={(e) => {
+          setTextValue(e.target.value)
+          drawingRef.sendEvent({
+            kind: EventKind.SetTextValue,
+            text: e.target.value,
+          })
+        }} value={textValue} />
+      </div>
+
+      <div>
+        <p>Export</p>
+        <button onClick={(e) => {
+          e.preventDefault()
+          if (!previewSVG.current) {
+            return
+          }
+
+          if (downloadURI !== '') {
+            URL.revokeObjectURL(downloadURI)
+          }
+
+          // TODO: maybe should not hardcode the link
+          // The stylesheet is needed for this SVG to work inside an <object> tag in a HTML
+          const header = `<?xml version="1.0" encoding="utf-8"?><?xml-stylesheet type="text/css" href="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/katex.min.css" ?>`
+          const content = `${header}${previewSVG.current.outerHTML}`
+
+          const blob = new Blob([content], { type: 'image/svg+xml' })
+          const url = URL.createObjectURL(blob)
+
+          setDownloadURI(url)
+        }}>Export as SVG</button>
+        <SVGPreview state={drawingRef.getDataState()} onRender={(e) => previewSVG.current = e} fitToContent />
+        {
+          downloadURI ? <a href={downloadURI} download>Download SVG</a> : null
+        }
+      </div>
+    </div>
+  )
+}
+
+interface SideBarsProps {
+  state: ControllerState,
+  drawing: Drawing,
+  style?: CSSProperties,
+}
+
+function SideBars(props: PropsWithChildren<SideBarsProps>) {
+  return (
+    <div style={{ position: 'relative', ...props.style }}>
+      <LeftSideBar state={props.state} />
+      <RightSideBar state={props.state} drawing={props.drawing} />
+    </div>
+  )
 }
 
 interface CommandListProps {
@@ -204,7 +353,8 @@ function CommandList(props: PropsWithChildren<CommandListProps>) {
 
 interface SVGPreviewProps {
   state: DataState,
-  style?: CSSProperties
+  width?: number,
+  height?: number,
   fitToContent?: boolean,
   viewBox?: string,
   overlay?: React.ReactNode,
@@ -215,8 +365,8 @@ interface SVGPreviewProps {
 }
 
 function SVGPreview(props: PropsWithChildren<SVGPreviewProps>) {
-  const [svgWidth, setSVGWidth] = React.useState('100%')
-  const [svgHeight, setSVGHeight] = React.useState('100%')
+  const [svgWidth, setSVGWidth] = React.useState(props.width || 0)
+  const [svgHeight, setSVGHeight] = React.useState(props.height || 0)
   const [svgViewBox, setSVGViewBox] = React.useState<string>()
 
   const svgRef = React.useRef<SVGSVGElement>(null)
@@ -232,8 +382,8 @@ function SVGPreview(props: PropsWithChildren<SVGPreviewProps>) {
       stroke: true,
       markers: true,
     })
-    setSVGWidth(bbox.width + '')
-    setSVGHeight(bbox.height + '')
+    setSVGWidth(bbox.width)
+    setSVGHeight(bbox.height)
     setSVGViewBox(`${bbox.x} ${bbox.y} ${bbox.width} ${bbox.height}`)
   })
 
@@ -293,11 +443,14 @@ function SVGPreview(props: PropsWithChildren<SVGPreviewProps>) {
     }
   }
 
+  const width = typeof props.width === 'number' ? props.width : svgWidth
+  const height = typeof props.height === 'number' ? props.height : svgHeight
+
   return (
     <svg
       ref={svgRef}
-      width={svgWidth}
-      height={svgHeight}
+      width={width}
+      height={height}
       viewBox={svgViewBox || props.viewBox}
       preserveAspectRatio='none'
       onMouseDown={props.onMouseDown}
@@ -390,7 +543,7 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
   }, [])
 
   React.useEffect(() => {
-    const listener: StateChangeListener = (e) => {
+    const listener: StateChangeListener = () => {
       setChangeCounter((s) => {
         return s + 1;
       })
@@ -588,16 +741,13 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
     }
   }
 
-  const viewBox = `${toolState.viewBox.offset[0]} ${toolState.viewBox.offset[1]} ${toolState.viewBox.width} ${toolState.viewBox.height}`
-
-  console.log(viewBox)
-
   return (
-    <div ref={containerRef} style={{ flex: 1 }}>
+    <div ref={containerRef} style={{ position: 'absolute', top: 0, left: 0, bottom: 0, right: 0 }}>
       <SVGPreview
-        style={{ flex: 1 }}
         state={dataState}
-        viewBox={viewBox}
+        width={containerRef.current?.clientWidth}
+        height={containerRef.current?.clientHeight}
+        // viewBox={viewBox}
         onRender={(svg) => {
           svgRef.current = svg
         }}
@@ -610,18 +760,8 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
   );
 }
 
-interface CanvasProps {
-  style?: CSSProperties;
-}
-
-function Canvas(props: PropsWithChildren<CanvasProps>) {
+function Canvas() {
   const [state, dispatch] = React.useReducer(controllerReducer, initialControllerState);
-
-  const [distanceConsValue, setDistanceConsValue] = React.useState('100')
-
-  const [textValue, setTextValue] = React.useState('')
-
-  const [downloadURI, setDownloadURI] = React.useState('')
 
   const objRef = React.useRef<Drawing>();
   if (!objRef.current) {
@@ -629,101 +769,14 @@ function Canvas(props: PropsWithChildren<CanvasProps>) {
   }
   const drawingRef = objRef.current;
 
-  const previewSVG = React.useRef<SVGSVGElement>();
+  const toolbarHeight = 40;
 
   return (
-    <div style={{ ...props.style, flexDirection: 'column', display: 'flex' }}>
-      <Toolbar state={state} />
-      <div style={{ flex: "1 1 auto", flexDirection: 'row', display: 'flex' }}>
-        <div style={{ width: 300, backgroundColor: 'lightblue', display: 'flex', flexDirection: 'column' }}>
-          <CommandList state={state} />
-        </div>
-        <DrawingWrapper drawing={drawingRef} dispatch={dispatch} />
-        <div style={{ width: 300, backgroundColor: 'lightblue' }}>
-          <div>
-            <p>Constraint</p>
-            <button onClick={(e) => {
-              e.preventDefault()
-              drawingRef.sendEvent({
-                kind: EventKind.AddPerpendicularConstraint,
-              })
-            }}>Perpendicular</button>
-            <button>Parallel</button>
-            <button onClick={(e) => {
-              e.preventDefault()
-              drawingRef.sendEvent({
-                kind: EventKind.AddCoincidentConstraint,
-              })
-            }}>Coincident</button>
-            <button onClick={(e) => {
-              e.preventDefault()
-              drawingRef.sendEvent({
-                kind: EventKind.AddHorizontalConstraint,
-              })
-            }}>Horizontal</button>
-            <button onClick={(e) => {
-              e.preventDefault()
-              drawingRef.sendEvent({
-                kind: EventKind.AddVerticalConstraint,
-              })
-            }}>Vertical</button>
-            <input type="text" value={distanceConsValue} onChange={(e) => {
-              setDistanceConsValue(e.target.value)
-            }} />
-            <button onClick={(e) => {
-              e.preventDefault()
-              drawingRef.sendEvent({
-                kind: EventKind.AddDistanceConstraint,
-                distance: +distanceConsValue,
-              })
-            }}>Distance</button>
-          </div>
-
-          <div>
-            <p>Text</p>
-            <button onClick={(e) => {
-              e.preventDefault()
-              drawingRef.sendEvent({
-                kind: EventKind.SelectTextTool
-              })
-            }}>Add Text</button>
-            <input type="text" onChange={(e) => {
-              setTextValue(e.target.value)
-              drawingRef.sendEvent({
-                kind: EventKind.SetTextValue,
-                text: e.target.value,
-              })
-            }} value={textValue} />
-          </div>
-
-          <div>
-            <p>Export</p>
-            <button onClick={(e) => {
-              e.preventDefault()
-              if (!previewSVG.current) {
-                return
-              }
-
-              if (downloadURI !== '') {
-                URL.revokeObjectURL(downloadURI)
-              }
-
-              // TODO: maybe should not hardcode the link
-              // The stylesheet is needed for this SVG to work inside an <object> tag in a HTML
-              const header = `<?xml version="1.0" encoding="utf-8"?><?xml-stylesheet type="text/css" href="https://cdn.jsdelivr.net/npm/katex@0.16.0/dist/katex.min.css" ?>`
-              const content = `${header}${previewSVG.current.outerHTML}`
-
-              const blob = new Blob([content], { type: 'image/svg+xml' })
-              const url = URL.createObjectURL(blob)
-
-              setDownloadURI(url)
-            }}>Export as SVG</button>
-            <SVGPreview state={drawingRef.getDataState()} onRender={(e) => previewSVG.current = e} fitToContent />
-            {
-              downloadURI ? <a href={downloadURI} download>Download SVG</a> : null
-            }
-          </div>
-        </div>
+    <div className={styles.canvasContainer}>
+      <DrawingWrapper drawing={drawingRef} dispatch={dispatch} />
+      <div style={{ position: 'relative', height: '100%', display: 'flex', flexDirection: 'column', pointerEvents: 'none' }}>
+        <Toolbar state={state} height={toolbarHeight} />
+        <SideBars state={state} style={{ flex: 1 }} drawing={drawingRef} />
       </div>
     </div>
   );
@@ -731,7 +784,7 @@ function Canvas(props: PropsWithChildren<CanvasProps>) {
 
 function App() {
   return (
-    <Canvas style={{ height: "100%" }} />
+    <Canvas />
   );
 }
 
