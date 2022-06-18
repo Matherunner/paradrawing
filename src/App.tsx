@@ -1,7 +1,7 @@
 import React, { CSSProperties, MouseEventHandler, PropsWithChildren } from 'react';
 import katex from 'katex';
 import styles from './App.module.css';
-import { Button, DataAction, DataState, Drawing, EventKind, ObjectKind, StateChangeListener, ToolKind } from './canvas';
+import { Button, DataAction, DataState, Drawing, EventKind, ObjectKind, PanStateKind, StateChangeListener, ToolKind } from './canvas';
 
 function domButtonToCanvasButton(button: number): Button | undefined {
   switch (button) {
@@ -353,6 +353,7 @@ function CommandList(props: PropsWithChildren<CommandListProps>) {
 
 interface SVGPreviewProps {
   state: DataState,
+  style?: CSSProperties,
   width?: number,
   height?: number,
   fitToContent?: boolean,
@@ -456,7 +457,7 @@ function SVGPreview(props: PropsWithChildren<SVGPreviewProps>) {
       onMouseDown={props.onMouseDown}
       onMouseMove={props.onMouseMove}
       onMouseUp={props.onMouseUp}
-      style={{ display: 'block' }}
+      style={{ display: 'block', ...props.style }}
       xmlns="http://www.w3.org/2000/svg"
     >
       {svgs}
@@ -510,11 +511,11 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
 
   React.useLayoutEffect(() => {
     const listener = () => {
-      if (!svgRef.current) {
+      if (!containerRef.current) {
         return
       }
 
-      const { clientWidth, clientHeight } = svgRef.current
+      const { clientWidth, clientHeight } = containerRef.current
 
       drawingRef.sendEvent({
         kind: EventKind.ResizeView,
@@ -526,14 +527,14 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
     return () => {
       window.removeEventListener('resize', listener)
     }
-  })
+  }, [])
 
   React.useLayoutEffect(() => {
-    if (!svgRef.current) {
+    if (!containerRef.current) {
       return
     }
 
-    const { clientWidth, clientHeight } = svgRef.current
+    const { clientWidth, clientHeight } = containerRef.current
 
     drawingRef.sendEvent({
       kind: EventKind.ResizeView,
@@ -646,7 +647,10 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
   const svgs = [];
   let selectedObjects;
 
+  let cursor = 'auto';
+
   const toolState = drawingRef.getToolState()
+
   const tool = toolState.tool;
   switch (tool.kind) {
   case ToolKind.Pen: {
@@ -693,8 +697,21 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
   }
   }
 
+  switch (toolState.pan.kind) {
+  case PanStateKind.Panning:
+    cursor = 'grabbing'
+    break
+  }
+
+  switch (toolState.tool.kind) {
+  case ToolKind.Pen:
+  case ToolKind.Text:
+    cursor = 'crosshair'
+    break
+  }
+
   const dataState = drawingRef.getDataState();
-  for (const [k, v] of Object.entries(dataState.objects)) {
+  for (const [, v] of Object.entries(dataState.objects)) {
     if (!v) {
       continue;
     }
@@ -741,13 +758,22 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
     }
   }
 
+  const viewBox = `${toolState.viewBox.offset[0]} ${toolState.viewBox.offset[1]} ${toolState.viewBox.width} ${toolState.viewBox.height}`
+
   return (
-    <div ref={containerRef} style={{ position: 'absolute', top: 0, left: 0, bottom: 0, right: 0 }}>
+    <div
+      ref={containerRef}
+      onContextMenu={(e) => {
+        e.preventDefault()
+      }}
+      style={{ position: 'absolute', top: 0, left: 0, bottom: 0, right: 0 }}
+    >
       <SVGPreview
         state={dataState}
+        style={{ cursor, }}
         width={containerRef.current?.clientWidth}
         height={containerRef.current?.clientHeight}
-        // viewBox={viewBox}
+        viewBox={viewBox}
         onRender={(svg) => {
           svgRef.current = svg
         }}

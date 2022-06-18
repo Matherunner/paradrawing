@@ -142,7 +142,12 @@ export enum ToolKind {
 export enum ToolActionKind {
     UpdateMousePoint,
     SelectTool,
+
     ResizeView,
+
+    StartPan,
+    StopPan,
+    UpdatePan,
 
     AddNode,
     UpdateNextNode,
@@ -191,6 +196,16 @@ type ToolAction =
         kind: ToolActionKind.ResizeView,
         width: number,
         height: number,
+    } |
+    {
+        kind: ToolActionKind.StartPan,
+        point: Vec2D,
+    } |
+    {
+        kind: ToolActionKind.StopPan,
+    } |
+    {
+        kind: ToolActionKind.UpdatePan,
     } |
     {
         kind: ToolActionKind.UpdateNextText,
@@ -960,6 +975,34 @@ function executeToolAction(toolState: ToolState, action: Readonly<ToolAction>): 
         return true
     }
 
+    case ToolActionKind.StartPan: {
+        toolState.pan = {
+            kind: PanStateKind.Panning,
+            start: [
+                action.point[0] + toolState.viewBox.offset[0],
+                action.point[1] + toolState.viewBox.offset[1],
+            ]
+        }
+        return true
+    }
+
+    case ToolActionKind.StopPan: {
+        toolState.pan = {
+            kind: PanStateKind.Idle
+        }
+        return true
+    }
+
+    case ToolActionKind.UpdatePan: {
+        switch (toolState.pan.kind) {
+        case PanStateKind.Panning:
+            toolState.viewBox.offset[0] = toolState.pan.start[0] - toolState.mousePoint[0]
+            toolState.viewBox.offset[1] = toolState.pan.start[1] - toolState.mousePoint[1]
+            return true
+        }
+        return false
+    }
+
     case ToolActionKind.UpdateNextText:
         switch (toolState.tool.kind) {
         case ToolKind.Text:
@@ -1017,6 +1060,14 @@ function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<Data
             point: event.point,
         })
 
+        switch (toolState.pan.kind) {
+        case PanStateKind.Panning:
+            toolActions.push({
+                kind: ToolActionKind.UpdatePan,
+            })
+            break
+        }
+
         switch (toolState.tool.kind) {
         case ToolKind.Pen:
             toolActions.push({
@@ -1042,7 +1093,17 @@ function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<Data
 
     case EventKind.MouseDown:
         if (event.button === Button.Secondary) {
-
+            switch (toolState.pan.kind) {
+            case PanStateKind.Idle:
+                toolActions.push({
+                    kind: ToolActionKind.StartPan,
+                    point: event.point,
+                })
+                break
+            case PanStateKind.Panning:
+                break
+            }
+            break;
         }
 
         switch (toolState.tool.kind) {
@@ -1125,6 +1186,16 @@ function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<Data
         break;
 
     case EventKind.MouseUp:
+        if (event.button === Button.Secondary) {
+            switch (toolState.pan.kind) {
+            case PanStateKind.Panning:
+                toolActions.push({
+                    kind: ToolActionKind.StopPan,
+                })
+                break
+            }
+            break
+        }
         break;
 
     case EventKind.KeyDown:
