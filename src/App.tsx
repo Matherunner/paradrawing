@@ -154,11 +154,6 @@ function controllerReducer(state: ControllerState, action: ControllerAction): Co
   }
 }
 
-interface ToolbarProps {
-  state: ControllerState,
-  height?: number,
-}
-
 function toolTypeToString(type: ToolKind): string {
   switch (type) {
   case ToolKind.Selector:
@@ -172,14 +167,23 @@ function toolTypeToString(type: ToolKind): string {
 
 const DEFAULT_TOOLBAR_HEIGHT = 40;
 
+interface ToolbarProps {
+  state: ControllerState,
+  drawing: Drawing,
+  height?: number,
+}
+
 function Toolbar(props: PropsWithChildren<ToolbarProps>) {
   const toolboxName = toolTypeToString(props.state.currentToolType);
 
   const height = props.height ?? DEFAULT_TOOLBAR_HEIGHT
 
+  const { viewBox } = props.drawing.getToolState()
+
   return (
     <div style={{ width: '100%', height, backgroundColor: '#eeeeff', pointerEvents: 'auto' }}>
       <span>{toolboxName}</span>
+      <span> View Box: {viewBox.offset[0]} {viewBox.offset[1]} {viewBox.width} {viewBox.height}</span>
     </div>
   );
 }
@@ -801,7 +805,7 @@ function Canvas() {
     <div className={styles.canvasContainer}>
       <DrawingWrapper drawing={drawingRef} dispatch={dispatch} />
       <div style={{ position: 'relative', height: '100%', display: 'flex', flexDirection: 'column', pointerEvents: 'none' }}>
-        <Toolbar state={state} height={toolbarHeight} />
+        <Toolbar state={state} height={toolbarHeight} drawing={drawingRef} />
         <SideBars state={state} style={{ flex: 1 }} drawing={drawingRef} />
       </div>
     </div>
