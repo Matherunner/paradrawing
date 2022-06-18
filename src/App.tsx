@@ -697,16 +697,16 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
   }
   }
 
-  switch (toolState.pan.kind) {
-  case PanStateKind.Panning:
-    cursor = 'grabbing'
-    break
-  }
-
   switch (toolState.tool.kind) {
   case ToolKind.Pen:
   case ToolKind.Text:
     cursor = 'crosshair'
+    break
+  }
+
+  switch (toolState.pan.kind) {
+  case PanStateKind.Panning:
+    cursor = 'grabbing'
     break
   }
 

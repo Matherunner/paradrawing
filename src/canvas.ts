@@ -819,6 +819,13 @@ function newtonSolve(x: number[], consFns: ((x: number[]) => number)[], jacFns: 
     }
 }
 
+function transformViewportToSVG(state: ToolState, point: Vec2D): Vec2D {
+    return [
+        point[0] + state.viewBox.offset[0],
+        point[1] + state.viewBox.offset[1],
+    ]
+}
+
 function executeDataAction(state: DataState, action: Readonly<DataAction>): boolean {
     switch (action.kind) {
     case DataActionKind.AddObject:
@@ -860,7 +867,7 @@ function executeToolAction(toolState: ToolState, action: Readonly<ToolAction>): 
             const nextPoint: CanvasObject = {
                 id: generateID(),
                 kind: ObjectKind.Node,
-                point: toolState.mousePoint,
+                point: transformViewportToSVG(toolState, toolState.mousePoint),
             }
             const nextLine: CanvasObject = {
                 id: generateID(),
@@ -891,7 +898,7 @@ function executeToolAction(toolState: ToolState, action: Readonly<ToolAction>): 
 
             const nextPoint = toolState.tool.tempObjectMap[nextObj.points[nextObj.points.length - 1]];
             if (nextPoint && nextPoint.kind === ObjectKind.Node) {
-                nextPoint.point = action.point;
+                nextPoint.point = transformViewportToSVG(toolState, action.point);
             }
             return true;
 
@@ -915,7 +922,7 @@ function executeToolAction(toolState: ToolState, action: Readonly<ToolAction>): 
             const nextNode: CanvasObject = {
                 id: generateID(),
                 kind: ObjectKind.Node,
-                point: toolState.mousePoint,
+                point: transformViewportToSVG(toolState, toolState.mousePoint),
             }
             const nextPath: CanvasObject = {
                 id: generateID(),
@@ -946,7 +953,7 @@ function executeToolAction(toolState: ToolState, action: Readonly<ToolAction>): 
             const nextNode: CanvasObject = {
                 id: generateID(),
                 kind: ObjectKind.Node,
-                point: toolState.mousePoint,
+                point: transformViewportToSVG(toolState, toolState.mousePoint),
             }
             const nextText: CanvasObject = {
                 id: generateID(),
@@ -978,10 +985,7 @@ function executeToolAction(toolState: ToolState, action: Readonly<ToolAction>): 
     case ToolActionKind.StartPan: {
         toolState.pan = {
             kind: PanStateKind.Panning,
-            start: [
-                action.point[0] + toolState.viewBox.offset[0],
-                action.point[1] + toolState.viewBox.offset[1],
-            ]
+            start: transformViewportToSVG(toolState, action.point),
         }
         return true
     }
@@ -1015,7 +1019,7 @@ function executeToolAction(toolState: ToolState, action: Readonly<ToolAction>): 
                 return false
             }
             textObj.text = action.text
-            pointObj.point = action.point
+            pointObj.point = transformViewportToSVG(toolState, action.point)
             return true
         }
         return false
@@ -1108,15 +1112,19 @@ function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<Data
 
         switch (toolState.tool.kind) {
         case ToolKind.Selector:
+            // FIXME: should these be moved to executeToolAction?
+
             let hitObjID;
             loop: for (const obj of Object.values(dataState.objects)) {
                 if (!obj) {
                     continue
                 }
 
+                const hitPoint = transformViewportToSVG(toolState, event.point)
+
                 switch (obj.kind) {
                 case ObjectKind.Node:
-                    const hit = hitNode(obj.point, 15, event.point)
+                    const hit = hitNode(obj.point, 15, hitPoint)
                     if (hit) {
                         hitObjID = obj.id;
                         break loop;
@@ -1127,7 +1135,7 @@ function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<Data
                     const point1Obj = dataState.objects[obj.point1]
                     const point2Obj = dataState.objects[obj.point2]
                     if (point1Obj && point2Obj && point1Obj.kind === ObjectKind.Node && point2Obj.kind === ObjectKind.Node) {
-                        const hit = hitLineSegment(point1Obj.point, point2Obj.point, 10, event.point)
+                        const hit = hitLineSegment(point1Obj.point, point2Obj.point, 10, hitPoint)
                         if (hit) {
                             hitObjID = obj.id;
                             break loop;
