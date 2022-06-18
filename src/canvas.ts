@@ -51,6 +51,10 @@ export enum EventKind {
     KeyDown,
     KeyUp,
 
+    ResizeView,
+    ScaleView,
+    PanView,
+
     AddPerpendicularConstraint,
     AddCoincidentConstraint,
     AddHorizontalConstraint,
@@ -82,6 +86,19 @@ export type Event =
     {
         kind: EventKind.KeyUp,
         key: string,
+    } |
+    {
+        kind: EventKind.ResizeView,
+        viewWidth: number,
+        viewHeight: number,
+    } |
+    {
+        kind: EventKind.ScaleView,
+        scale: number,
+    } |
+    {
+        kind: EventKind.PanView,
+        offset: Vec2D,
     } |
     {
         kind: EventKind.AddPerpendicularConstraint,
@@ -116,6 +133,7 @@ export enum ToolKind {
 export enum ToolActionKind {
     UpdateMousePoint,
     SelectTool,
+    ResizeView,
 
     AddNode,
     UpdateNextNode,
@@ -159,6 +177,11 @@ type ToolAction =
     {
         kind: ToolActionKind.SelectTool,
         tool: ToolKind,
+    } |
+    {
+        kind: ToolActionKind.ResizeView,
+        width: number,
+        height: number,
     } |
     {
         kind: ToolActionKind.UpdateNextText,
@@ -252,10 +275,18 @@ export interface DataState {
     constraints: Constraint[],
 }
 
+export interface ViewBox {
+    offset: Vec2D,
+    width: number,
+    height: number,
+}
+
 export interface ToolState {
     tool: Tool,
     history: ActionHistory,
     mousePoint: Vec2D,
+    viewBox: ViewBox,
+    scale: number,
 }
 
 const generateID = (() => {
@@ -899,6 +930,12 @@ function executeToolAction(toolState: ToolState, action: Readonly<ToolAction>): 
             return false;
         }
 
+    case ToolActionKind.ResizeView: {
+        toolState.viewBox.width = action.width / toolState.scale
+        toolState.viewBox.height = action.height / toolState.scale
+        return true
+    }
+
     case ToolActionKind.UpdateNextText:
         switch (toolState.tool.kind) {
         case ToolKind.Text:
@@ -1101,6 +1138,14 @@ function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<Data
     case EventKind.KeyUp:
         break;
 
+    case EventKind.ResizeView:
+        toolActions.push({
+            kind: ToolActionKind.ResizeView,
+            width: event.viewWidth,
+            height: event.viewHeight,
+        })
+        break
+
     case EventKind.SelectTextTool:
         toolActions.push({
             kind: ToolActionKind.SelectTool,
@@ -1256,6 +1301,12 @@ export class Drawing {
         },
         history: {},
         mousePoint: [50, 50],
+        viewBox: {
+            offset: [0, 0],
+            width: 200,
+            height: 200,
+        },
+        scale: 1,
     };
 
     private dataState: DataState = {

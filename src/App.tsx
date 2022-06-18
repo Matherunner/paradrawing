@@ -1,4 +1,4 @@
-import React, { CSSProperties, PropsWithChildren } from 'react';
+import React, { CSSProperties, MouseEventHandler, PropsWithChildren } from 'react';
 import katex from 'katex';
 import styles from './App.module.css';
 import { DataAction, DataState, Drawing, EventKind, ObjectKind, StateChangeListener, ToolKind } from './canvas';
@@ -193,9 +193,13 @@ function CommandList(props: PropsWithChildren<CommandListProps>) {
 
 interface SVGPreviewProps {
   state: DataState,
-  onRender?: (svg: SVGSVGElement) => void,
   style?: CSSProperties
   fitToContent?: boolean,
+  viewBox?: string,
+  overlay?: React.ReactNode,
+  onRender?: (svg: SVGSVGElement) => void,
+  onMouseDown?: React.MouseEventHandler<SVGSVGElement>,
+  onMouseMove?: React.MouseEventHandler<SVGSVGElement>,
 }
 
 function SVGPreview(props: PropsWithChildren<SVGPreviewProps>) {
@@ -282,11 +286,14 @@ function SVGPreview(props: PropsWithChildren<SVGPreviewProps>) {
       ref={svgRef}
       width={svgWidth}
       height={svgHeight}
-      viewBox={svgViewBox}
+      viewBox={svgViewBox || props.viewBox}
       preserveAspectRatio='none'
+      onMouseDown={props.onMouseDown}
+      onMouseMove={props.onMouseMove}
       xmlns="http://www.w3.org/2000/svg"
     >
       {svgs}
+      {props.overlay}
     </svg>
   )
 }
@@ -316,6 +323,8 @@ interface DrawingWrapperProps {
 function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
   const containerRef = React.useRef<HTMLDivElement>(null);
 
+  const svgRef = React.useRef<SVGSVGElement>();
+
   const [, setChangeCounter] = React.useState(0);
 
   const drawingRef = props.drawing;
@@ -331,6 +340,40 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
       actions: JSON.stringify(drawingRef.getToolState().history.root, null, 2),
     })
   }
+
+  React.useLayoutEffect(() => {
+    const listener = () => {
+      if (!svgRef.current) {
+        return
+      }
+
+      const { clientWidth, clientHeight } = svgRef.current
+
+      drawingRef.sendEvent({
+        kind: EventKind.ResizeView,
+        viewWidth: clientWidth,
+        viewHeight: clientHeight,
+      })
+    }
+    window.addEventListener('resize', listener)
+    return () => {
+      window.removeEventListener('resize', listener)
+    }
+  })
+
+  React.useLayoutEffect(() => {
+    if (!svgRef.current) {
+      return
+    }
+
+    const { clientWidth, clientHeight } = svgRef.current
+
+    drawingRef.sendEvent({
+      kind: EventKind.ResizeView,
+      viewWidth: clientWidth,
+      viewHeight: clientHeight,
+    })
+  }, [])
 
   React.useEffect(() => {
     const listener: StateChangeListener = (e) => {
@@ -408,7 +451,8 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
   const svgs = [];
   let selectedObjects;
 
-  const tool = drawingRef.getToolState().tool;
+  const toolState = drawingRef.getToolState()
+  const tool = toolState.tool;
   switch (tool.kind) {
   case ToolKind.Pen: {
     const nextObj = tool.tempObjectMap[tool.nextObjectID];
@@ -479,11 +523,9 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
           const point2Obj = dataState.objects[lineObj.point2];
           if (point1Obj && point2Obj && point1Obj.kind === ObjectKind.Node && point2Obj.kind === ObjectKind.Node) {
             const selected = selectedObjects && selectedObjects.has(lineID);
-            let stroke = 'black'
             if (selected) {
-              stroke = 'red'
+              svgs.push(<line key={lineID} x1={point1Obj.point[0]} y1={point1Obj.point[1]} x2={point2Obj.point[0]} y2={point2Obj.point[1]} strokeWidth={2} stroke="red" />);
             }
-            svgs.push(<line key={lineID} x1={point1Obj.point[0]} y1={point1Obj.point[1]} x2={point2Obj.point[0]} y2={point2Obj.point[1]} strokeWidth={1} stroke={stroke} />);
           }
         }
       }
@@ -497,34 +539,30 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
         if (selected) {
           stroke = 'red'
         }
-
         svgs.push(<circle key={pointObj.id} cx={pointObj.point[0]} cy={pointObj.point[1]} r={3} fill="none" strokeWidth={1} stroke={stroke} />)
-        svgs.push(
-          <foreignObject key={v.id} x={pointObj.point[0]} y={pointObj.point[1]} width={1} height={1} overflow="visible">
-            <KatexWrapper text={v.text} />
-          </foreignObject>
-        )
       }
       break
     }
     }
   }
 
+  const viewBox = `${toolState.viewBox.offset[0]} ${toolState.viewBox.offset[1]} ${toolState.viewBox.width} ${toolState.viewBox.height}`
+
+  console.log(viewBox)
+
   return (
     <div ref={containerRef} style={{ flex: 1 }}>
-      <svg
+      <SVGPreview
         style={{ flex: 1 }}
+        state={dataState}
+        viewBox={viewBox}
+        onRender={(svg) => {
+          svgRef.current = svg
+        }}
         onMouseDown={onMouseDown}
-        // onMouseUp={onMouseUp}
         onMouseMove={onMouseMove}
-        // onDoubleClick={onDoubleClick}
-        width="100%"
-        height="100%"
-        preserveAspectRatio='none'
-        xmlns="http://www.w3.org/2000/svg"
-      >
-        {svgs}
-      </svg>
+        overlay={svgs}
+      />
     </div>
   );
 }
