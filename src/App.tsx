@@ -1,7 +1,18 @@
 import React, { CSSProperties, MouseEventHandler, PropsWithChildren } from 'react';
 import katex from 'katex';
 import styles from './App.module.css';
-import { DataAction, DataState, Drawing, EventKind, ObjectKind, StateChangeListener, ToolKind } from './canvas';
+import { Button, DataAction, DataState, Drawing, EventKind, ObjectKind, StateChangeListener, ToolKind } from './canvas';
+
+function domButtonToCanvasButton(button: number): Button | undefined {
+  switch (button) {
+  case 0:
+    return Button.Primary
+  case 1:
+    return Button.Auxiliary
+  case 2:
+    return Button.Secondary
+  }
+}
 
 function pathCommandsFromObject(object: Object): string {
   let pathCmds = '';
@@ -199,6 +210,7 @@ interface SVGPreviewProps {
   overlay?: React.ReactNode,
   onRender?: (svg: SVGSVGElement) => void,
   onMouseDown?: React.MouseEventHandler<SVGSVGElement>,
+  onMouseUp?: React.MouseEventHandler<SVGSVGElement>,
   onMouseMove?: React.MouseEventHandler<SVGSVGElement>,
 }
 
@@ -290,6 +302,8 @@ function SVGPreview(props: PropsWithChildren<SVGPreviewProps>) {
       preserveAspectRatio='none'
       onMouseDown={props.onMouseDown}
       onMouseMove={props.onMouseMove}
+      onMouseUp={props.onMouseUp}
+      style={{ display: 'block' }}
       xmlns="http://www.w3.org/2000/svg"
     >
       {svgs}
@@ -422,16 +436,44 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
       return;
     }
 
+    const button = domButtonToCanvasButton(e.button)
+    if (!button && button !== 0) {
+      return
+    }
+
     const { offsetLeft, offsetTop } = containerRef.current
 
     drawingRef.sendEvent({
       kind: EventKind.MouseDown,
       ctrl: e.ctrlKey,
+      button,
       point: [e.clientX - offsetLeft, e.clientY - offsetTop],
     })
 
     e.preventDefault();
   };
+
+  const onMouseUp: React.MouseEventHandler<SVGSVGElement> = (e) => {
+    if (!containerRef.current) {
+      return
+    }
+
+    const button = domButtonToCanvasButton(e.button)
+    if (!button && button !== 0) {
+      return
+    }
+
+    const { offsetLeft, offsetTop } = containerRef.current
+
+    drawingRef.sendEvent({
+      kind: EventKind.MouseUp,
+      ctrl: e.ctrlKey,
+      button,
+      point: [e.clientX - offsetLeft, e.clientY - offsetTop],
+    })
+
+    e.preventDefault()
+  }
 
   const onMouseMove: React.MouseEventHandler<SVGSVGElement> = (e) => {
     if (!containerRef.current) {
@@ -560,6 +602,7 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
           svgRef.current = svg
         }}
         onMouseDown={onMouseDown}
+        onMouseUp={onMouseUp}
         onMouseMove={onMouseMove}
         overlay={svgs}
       />

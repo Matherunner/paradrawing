@@ -65,6 +65,12 @@ export enum EventKind {
     SetTextValue,
 }
 
+export enum Button {
+    Primary,
+    Secondary,
+    Auxiliary,
+}
+
 export type Event =
     {
         kind: EventKind.MouseMove,
@@ -73,10 +79,13 @@ export type Event =
     {
         kind: EventKind.MouseDown,
         ctrl: boolean,
+        button: Button,
         point: Vec2D,
     } |
     {
         kind: EventKind.MouseUp,
+        ctrl: boolean,
+        button: Button,
         point: Vec2D,
     } |
     {
@@ -281,12 +290,27 @@ export interface ViewBox {
     height: number,
 }
 
+export enum PanStateKind {
+    Idle,
+    Panning,
+}
+
+export type PanState =
+    {
+        kind: PanStateKind.Idle,
+    } |
+    {
+        kind: PanStateKind.Panning,
+        start: Vec2D,
+    }
+
 export interface ToolState {
     tool: Tool,
     history: ActionHistory,
     mousePoint: Vec2D,
     viewBox: ViewBox,
     scale: number,
+    pan: PanState,
 }
 
 const generateID = (() => {
@@ -1017,6 +1041,10 @@ function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<Data
         break;
 
     case EventKind.MouseDown:
+        if (event.button === Button.Secondary) {
+
+        }
+
         switch (toolState.tool.kind) {
         case ToolKind.Selector:
             let hitObjID;
@@ -1300,13 +1328,16 @@ export class Drawing {
             selectedObjects: new Set(),
         },
         history: {},
-        mousePoint: [50, 50],
+        mousePoint: [0, 0],
         viewBox: {
             offset: [0, 0],
-            width: 200,
-            height: 200,
+            width: 0,
+            height: 0,
         },
         scale: 1,
+        pan: {
+            kind: PanStateKind.Idle
+        }
     };
 
     private dataState: DataState = {
