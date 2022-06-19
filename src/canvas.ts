@@ -63,6 +63,8 @@ export enum EventKind {
 
     SelectTextTool,
     SetTextValue,
+
+    AddObject,
 }
 
 export enum Button {
@@ -131,6 +133,11 @@ export type Event =
     {
         kind: EventKind.SetTextValue,
         text: string,
+    } |
+    {
+        kind: EventKind.AddObject,
+        guide: boolean,
+        object: CanvasObjectData,
     }
 
 export enum ToolKind {
@@ -161,6 +168,8 @@ export enum ToolActionKind {
 
     SelectObject,
     DeselectObject,
+
+    AddObject,
 }
 
 export enum DataActionKind {
@@ -267,15 +276,23 @@ export enum ObjectKind {
     Path,
     ControlPoint,
     Text,
+    FixedNode,
 }
 
-type ObjectID = number;
+export type ObjectID = number;
 
-type CanvasObject = {
-    id: ObjectID;
-} & (
+export interface CanvasObjectCommon {
+    id: ObjectID,
+    guide: boolean,
+}
+
+export type CanvasObjectData =
     {
         kind: ObjectKind.Node,
+        point: Vec2D,
+    } |
+    {
+        kind: ObjectKind.FixedNode,
         point: Vec2D,
     } |
     {
@@ -293,9 +310,10 @@ type CanvasObject = {
         point: ObjectID,
         text: string,
     }
-)
 
-type ObjectMap = {
+export type CanvasObject = CanvasObjectCommon & CanvasObjectData
+
+export type ObjectMap = {
     [key: ObjectID]: CanvasObject | undefined,
 };
 
@@ -467,6 +485,10 @@ function appendHistory(state: ToolState, action: DataAction) {
     }
 }
 
+function pointLikeObject(kind: ObjectKind): kind is ObjectKind.Node | ObjectKind.FixedNode {
+    return kind === ObjectKind.Node || kind === ObjectKind.FixedNode
+}
+
 function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
     // Column index of this variable in the Jacobian matrix
     const jacColByVar = new Map<string, number>();
@@ -479,16 +501,21 @@ function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
     }
 
     const addVariable = (objectID: ObjectID, index?: number) => {
+        const obj = objects[objectID]
+        if (!obj) {
+            return;
+        }
+
+        if (obj.kind === ObjectKind.FixedNode) {
+            // If fixed node, we handle it separately
+            return
+        }
+
         const key = mapKey(objectID, index)
         if (jacColByVar.has(key)) {
             return
         }
         jacColByVar.set(key, jacColByVar.size)
-
-        const obj = objects[objectID]
-        if (!obj) {
-            return;
-        }
 
         switch (obj.kind) {
         case ObjectKind.Node:
@@ -507,12 +534,28 @@ function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
     }
 
     const getVariable = (x: number[], objectID: ObjectID, index?: number): [number, number] => {
+        const obj = objects[objectID]
+        if (!obj) {
+            throw new Error(`unknown object ID: ${objectID}`)
+        }
+
+        if (obj.kind === ObjectKind.FixedNode && typeof index === 'number') {
+            // Always return the original point and never alter it
+            return [-1, obj.point[index]]
+        }
+
         const key = mapKey(objectID, index)
         const col = jacColByVar.get(key)
         if (typeof col === 'number') {
             return [col, x[col]]
         }
         throw new Error(`unknown variable: ${key}`)
+    }
+
+    const setGrad = (grad: number[], col: number, val: number) => {
+        if (col !== -1) {
+            grad[col] = val
+        }
     }
 
     // G column vector
@@ -564,14 +607,14 @@ function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
                 const [p3yCol, p3y] = getVariable(x, line2Obj.point1, 1)
                 const [p4xCol, p4x] = getVariable(x, line2Obj.point2, 0)
                 const [p4yCol, p4y] = getVariable(x, line2Obj.point2, 1)
-                grad[p1xCol] = p3x - p4x
-                grad[p1yCol] = p3y - p4y
-                grad[p2xCol] = p4x - p3x
-                grad[p2yCol] = p4y - p3y
-                grad[p3xCol] = p1x - p2x
-                grad[p3yCol] = p1y - p2y
-                grad[p4xCol] = p2x - p1x
-                grad[p4yCol] = p2y - p1y
+                setGrad(grad, p1xCol, p3x - p4x)
+                setGrad(grad, p1yCol, p3y - p4y)
+                setGrad(grad, p2xCol, p4x - p3x)
+                setGrad(grad, p2yCol, p4y - p3y)
+                setGrad(grad, p3xCol, p1x - p2x)
+                setGrad(grad, p3yCol, p1y - p2y)
+                setGrad(grad, p4xCol, p2x - p1x)
+                setGrad(grad, p4yCol, p2y - p1y)
             })
 
             break;
@@ -590,7 +633,7 @@ function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
                 continue
             }
 
-            if (obj2 && (obj1.kind !== ObjectKind.Node || obj2?.kind !== ObjectKind.Node)) {
+            if (obj2 && (!pointLikeObject(obj1.kind) || !pointLikeObject(obj2.kind))) {
                 continue
             }
 
@@ -617,10 +660,10 @@ function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
                 const [p1yCol, p1y] = getVariable(x, p1, 1)
                 const [p2xCol, p2x] = getVariable(x, p2, 0)
                 const [p2yCol, p2y] = getVariable(x, p2, 1)
-                grad[p1xCol] = -2 * (p2x - p1x)
-                grad[p1yCol] = -2 * (p2y - p1y)
-                grad[p2xCol] = 2 * (p2x - p1x)
-                grad[p2yCol] = 2 * (p2y - p1y)
+                setGrad(grad, p1xCol, -2 * (p2x - p1x))
+                setGrad(grad, p1yCol, -2 * (p2y - p1y))
+                setGrad(grad, p2xCol, 2 * (p2x - p1x))
+                setGrad(grad, p2yCol, 2 * (p2y - p1y))
             })
 
             break
@@ -645,8 +688,8 @@ function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
             jacFns.push((x, grad) => {
                 const [p1yCol] = getVariable(x, obj.point1, 1)
                 const [p2yCol] = getVariable(x, obj.point2, 1)
-                grad[p1yCol] = 1
-                grad[p2yCol] = -1
+                setGrad(grad, p1yCol, 1)
+                setGrad(grad, p2yCol, -1)
             })
 
             break;
@@ -669,8 +712,8 @@ function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
             jacFns.push((x, grad) => {
                 const [p1xCol] = getVariable(x, obj.point1, 0)
                 const [p2xCol] = getVariable(x, obj.point2, 0)
-                grad[p1xCol] = 1
-                grad[p2xCol] = -1
+                setGrad(grad, p1xCol, 1)
+                setGrad(grad, p2xCol, -1)
             })
 
             break
@@ -684,7 +727,7 @@ function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
                 continue
             }
 
-            if (obj1.kind === ObjectKind.Node && obj2.kind === ObjectKind.Node) {
+            if (pointLikeObject(obj1.kind) && pointLikeObject(obj2.kind)) {
                 // Two points coincident, two equations in p1 = p2
 
                 // FIXME: convergence is too slow, maybe just replace the point ID in the line obj instead of doing it here?
@@ -711,10 +754,10 @@ function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
                     const [p1yCol,] = getVariable(x, obj1.id, 1)
                     const [p2xCol,] = getVariable(x, obj2.id, 0)
                     const [p2yCol,] = getVariable(x, obj2.id, 1)
-                    grad[p1xCol] = 1
-                    grad[p1yCol] = 0
-                    grad[p2xCol] = -1
-                    grad[p2yCol] = 0
+                    setGrad(grad, p1xCol, 1)
+                    setGrad(grad, p1yCol, 0)
+                    setGrad(grad, p2xCol, -1)
+                    setGrad(grad, p2yCol, 0)
                 })
 
                 jacFns.push((x, grad) => {
@@ -722,18 +765,18 @@ function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
                     const [p1yCol,] = getVariable(x, obj1.id, 1)
                     const [p2xCol,] = getVariable(x, obj2.id, 0)
                     const [p2yCol,] = getVariable(x, obj2.id, 1)
-                    grad[p1xCol] = 0
-                    grad[p1yCol] = 1
-                    grad[p2xCol] = 0
-                    grad[p2yCol] = -1
+                    setGrad(grad, p1xCol, 0)
+                    setGrad(grad, p1yCol, 1)
+                    setGrad(grad, p2xCol, 0)
+                    setGrad(grad, p2yCol, -1)
                 })
             } else {
                 let lineObj;
                 let pointObj;
-                if (obj1.kind === ObjectKind.Line && obj2.kind === ObjectKind.Node) {
+                if (obj1.kind === ObjectKind.Line && pointLikeObject(obj2.kind)) {
                     lineObj = obj1
                     pointObj = obj2
-                } else if (obj1.kind === ObjectKind.Node && obj2.kind === ObjectKind.Line) {
+                } else if (pointLikeObject(obj1.kind) && obj2.kind === ObjectKind.Line) {
                     lineObj = obj2
                     pointObj = obj1
                 } else {
@@ -752,12 +795,12 @@ function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
                 addVariable(p, 1)
 
                 consFns.push((x) => {
-                    const [,a1x] = getVariable(x, a1, 0)
-                    const [,a1y] = getVariable(x, a1, 1)
-                    const [,a2x] = getVariable(x, a2, 0)
-                    const [,a2y] = getVariable(x, a2, 1)
-                    const [,px] = getVariable(x, p, 0)
-                    const [,py] = getVariable(x, p, 1)
+                    const [, a1x] = getVariable(x, a1, 0)
+                    const [, a1y] = getVariable(x, a1, 1)
+                    const [, a2x] = getVariable(x, a2, 0)
+                    const [, a2y] = getVariable(x, a2, 1)
+                    const [, px] = getVariable(x, p, 0)
+                    const [, py] = getVariable(x, p, 1)
                     const v1x = a2x - a1x
                     const v1y = a2y - a1y
                     const v2x = px - a1x
@@ -772,12 +815,12 @@ function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
                     const [a2yCol, a2y] = getVariable(x, a2, 1)
                     const [pxCol, px] = getVariable(x, p, 0)
                     const [pyCol, py] = getVariable(x, p, 1)
-                    grad[a1xCol] = a1y - py
-                    grad[a1yCol] = a2y - a1y
-                    grad[a2xCol] = py - a1y
-                    grad[a2yCol] = a1x - px
-                    grad[pxCol] = a1y - a2y
-                    grad[pyCol] = a2x - a1x
+                    setGrad(grad, a1xCol, a1y - py)
+                    setGrad(grad, a1yCol, a2y - a1y)
+                    setGrad(grad, a2xCol, py - a1y)
+                    setGrad(grad, a2yCol, a1x - px)
+                    setGrad(grad, pxCol, a1y - a2y)
+                    setGrad(grad, pyCol, a2x - a1x)
                 })
             }
 
@@ -786,8 +829,6 @@ function transformConstraints(objects: ObjectMap, constraints: Constraint[]) {
     }
 
     newtonSolve(x, consFns, jacFns)
-
-    // gradientDescend(x, consFns, jacFns);
 
     for (const fn of writeResults) {
         fn(x)
@@ -893,11 +934,13 @@ function executeToolAction(toolState: ToolState, action: Readonly<ToolAction>): 
 
             const nextPoint: CanvasObject = {
                 id: generateID(),
+                guide: false,
                 kind: ObjectKind.Node,
                 point: transformViewportToData(toolState, toolState.mousePoint),
             }
             const nextLine: CanvasObject = {
                 id: generateID(),
+                guide: false,
                 kind: ObjectKind.Line,
                 point1: lastPointID,
                 point2: nextPoint.id,
@@ -942,17 +985,20 @@ function executeToolAction(toolState: ToolState, action: Readonly<ToolAction>): 
         case ToolKind.Pen:
             const path: CanvasObject = {
                 id: generateID(),
+                guide: false,
                 kind: ObjectKind.Path,
                 points: [],
                 lines: [],
             };
             const nextNode: CanvasObject = {
                 id: generateID(),
+                guide: false,
                 kind: ObjectKind.Node,
                 point: transformViewportToData(toolState, toolState.mousePoint),
             }
             const nextPath: CanvasObject = {
                 id: generateID(),
+                guide: false,
                 kind: ObjectKind.Path,
                 points: [nextNode.id],
                 lines: [],
@@ -979,11 +1025,13 @@ function executeToolAction(toolState: ToolState, action: Readonly<ToolAction>): 
         case ToolKind.Text: {
             const nextNode: CanvasObject = {
                 id: generateID(),
+                guide: false,
                 kind: ObjectKind.Node,
                 point: transformViewportToData(toolState, toolState.mousePoint),
             }
             const nextText: CanvasObject = {
                 id: generateID(),
+                guide: false,
                 kind: ObjectKind.Text,
                 point: nextNode.id,
                 text: '',
@@ -1156,6 +1204,7 @@ function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<Data
 
                 switch (obj.kind) {
                 case ObjectKind.Node:
+                case ObjectKind.FixedNode:
                     const hit = hitNode(obj.point, 15, hitPoint)
                     if (hit) {
                         hitObjID = obj.id;
@@ -1421,6 +1470,23 @@ function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<Data
             break
         }
         break
+
+    case EventKind.AddObject: {
+        const obj: CanvasObject = {
+            id: generateID(),
+            guide: event.guide,
+            ...event.object,
+        }
+        const tmpMap = {
+            [obj.id]: obj
+        }
+        dataActions.push({
+            id: generateID(),
+            kind: DataActionKind.AddObject,
+            map: tmpMap,
+        })
+        break
+    }
     }
 
     for (const action of dataActions) {

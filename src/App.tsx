@@ -1,7 +1,7 @@
 import React, { CSSProperties, PropsWithChildren } from 'react';
 import katex from 'katex';
 import styles from './App.module.css';
-import { Button, DataState, Drawing, EventKind, ObjectKind, PanStateKind, StateChangeListener, ToolKind, transformDataToSVG, transformSVGToData, transformViewportToData, Vec2D } from './canvas';
+import { Button, DataState, Drawing, EventKind, ObjectID, ObjectKind, ObjectMap, PanStateKind, StateChangeListener, ToolKind, transformDataToSVG, transformSVGToData, transformViewportToData, Vec2D } from './canvas';
 
 function domButtonToCanvasButton(button: number): Button | undefined {
   switch (button) {
@@ -264,6 +264,61 @@ function CommandList(props: PropsWithChildren<CommandListProps>) {
   // )
 }
 
+function dataObjectToSVG(objectID: ObjectID, map: ObjectMap, dataToSVGCoord: (p: Vec2D) => Vec2D): JSX.Element[] {
+  const svgs: JSX.Element[] = []
+
+  const v = map[objectID]
+  if (!v) {
+    return svgs
+  }
+
+  switch (v.kind) {
+  case ObjectKind.Path: {
+    for (const lineID of v.lines) {
+      const lineObj = map[lineID];
+      if (lineObj && lineObj.kind === ObjectKind.Line) {
+        const point1Obj = map[lineObj.point1];
+        const point2Obj = map[lineObj.point2];
+        if (point1Obj && point2Obj && point1Obj.kind === ObjectKind.Node && point2Obj.kind === ObjectKind.Node) {
+          const p1 = dataToSVGCoord(point1Obj.point)
+          const p2 = dataToSVGCoord(point2Obj.point)
+          svgs.push(<line key={lineID} x1={p1[0]} y1={p1[1]} x2={p2[0]} y2={p2[1]} strokeWidth={1} stroke="black" />);
+        }
+      }
+    }
+    break;
+  }
+
+  case ObjectKind.Text: {
+    const pointObj = map[v.point]
+    if (pointObj && pointObj.kind === ObjectKind.Node) {
+      const p = dataToSVGCoord(pointObj.point)
+      svgs.push(
+        <foreignObject
+          key={v.id}
+          x={p[0]}
+          y={p[1]}
+          width={1}
+          height={1}
+          overflow="visible"
+        >
+          <div
+            // @ts-expect-error: TS doesn't seem to support xmlns attribute on a DIV
+            xmlns="http://www.w3.org/1999/xhtml"
+            style={{ whiteSpace: 'nowrap' }}
+          >
+            <KatexWrapper text={v.text} />
+          </div>
+        </foreignObject>
+      )
+    }
+    break
+  }
+  }
+
+  return svgs
+}
+
 interface SVGPreviewProps {
   state: DataState,
   dataToSVGCoord?: (point: Vec2D) => Vec2D,
@@ -273,6 +328,7 @@ interface SVGPreviewProps {
   fitToContent?: boolean,
   viewBox?: string,
   overlay?: React.ReactNode,
+  guides?: boolean,
   onRender?: (svg: SVGSVGElement) => void,
   onMouseDown?: React.MouseEventHandler<SVGSVGElement>,
   onMouseUp?: React.MouseEventHandler<SVGSVGElement>,
@@ -311,56 +367,10 @@ function SVGPreview(props: PropsWithChildren<SVGPreviewProps>) {
     props.onRender(svgRef.current)
   }, [props.onRender])
 
-  const svgs = []
+  let svgs: JSX.Element[] = []
 
-  for (const [, v] of Object.entries(props.state.objects)) {
-    if (!v) {
-      continue;
-    }
-
-    switch (v.kind) {
-    case ObjectKind.Path: {
-      for (const lineID of v.lines) {
-        const lineObj = props.state.objects[lineID];
-        if (lineObj && lineObj.kind === ObjectKind.Line) {
-          const point1Obj = props.state.objects[lineObj.point1];
-          const point2Obj = props.state.objects[lineObj.point2];
-          if (point1Obj && point2Obj && point1Obj.kind === ObjectKind.Node && point2Obj.kind === ObjectKind.Node) {
-            const p1 = dataToSVGCoord(point1Obj.point)
-            const p2 = dataToSVGCoord(point2Obj.point)
-            svgs.push(<line key={lineID} x1={p1[0]} y1={p1[1]} x2={p2[0]} y2={p2[1]} strokeWidth={1} stroke="black" />);
-          }
-        }
-      }
-      break;
-    }
-
-    case ObjectKind.Text: {
-      const pointObj = props.state.objects[v.point]
-      if (pointObj && pointObj.kind === ObjectKind.Node) {
-        const p = dataToSVGCoord(pointObj.point)
-        svgs.push(
-          <foreignObject
-            key={v.id}
-            x={p[0]}
-            y={p[1]}
-            width={1}
-            height={1}
-            overflow="visible"
-          >
-            <div
-              // @ts-expect-error: TS doesn't seem to support xmlns attribute on a DIV
-              xmlns="http://www.w3.org/1999/xhtml"
-              style={{ whiteSpace: 'nowrap' }}
-            >
-              <KatexWrapper text={v.text} />
-            </div>
-          </foreignObject>
-        )
-      }
-      break
-    }
-    }
+  for (const objID of Object.keys(props.state.objects)) {
+    svgs = svgs.concat(dataObjectToSVG(+objID, props.state.objects, dataToSVGCoord))
   }
 
   const width = typeof props.width === 'number' ? props.width : svgWidth
@@ -414,6 +424,8 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
 
   const [, setChangeCounter] = React.useState(0);
 
+  const drawingInitialised = React.useRef(false);
+
   const drawingRef = props.drawing;
 
   const updateGlobalState = () => {
@@ -449,7 +461,7 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
   }, [])
 
   React.useLayoutEffect(() => {
-    if (!containerRef.current) {
+    if (!containerRef.current || drawingInitialised.current) {
       return
     }
 
@@ -465,6 +477,19 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
       kind: EventKind.SetViewOffset,
       offset: [-Math.round(clientWidth / 2), -Math.round(clientHeight / 2)],
     })
+
+    // Create guide origin point
+    drawingRef.sendEvent({
+      kind: EventKind.AddObject,
+      guide: true,
+      object: {
+        kind: ObjectKind.FixedNode,
+        point: [0, 0],
+      }
+    })
+
+    // TODO: maybe make the sendEvent idempotent using some idempotent key? Especially for AddObject
+    drawingInitialised.current = true
   }, [])
 
   React.useEffect(() => {
@@ -651,6 +676,9 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
           const p = transformDataToSVG(toolState, pointObj.point)
           const selected = selectedObjects && selectedObjects.has(pointID)
           let stroke = 'black'
+          if (v.guide) {
+            stroke = 'lightgray'
+          }
           if (selected) {
             stroke = 'red'
           }
@@ -666,8 +694,12 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
             const p1 = transformDataToSVG(toolState, point1Obj.point)
             const p2 = transformDataToSVG(toolState, point2Obj.point)
             const selected = selectedObjects && selectedObjects.has(lineID);
-            if (selected) {
-              svgs.push(<line key={lineID} x1={p1[0]} y1={p1[1]} x2={p2[0]} y2={p2[1]} strokeWidth={2} stroke="red" />);
+            if (selected || v.guide) {
+              let stroke = 'lightgray'
+              if (selected) {
+                stroke = 'red'
+              }
+              svgs.push(<line key={lineID} x1={p1[0]} y1={p1[1]} x2={p2[0]} y2={p2[1]} strokeWidth={2} stroke={stroke} />);
             }
           }
         }
@@ -687,6 +719,20 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
       }
       break
     }
+
+    case ObjectKind.FixedNode: {
+      const p = transformDataToSVG(toolState, v.point)
+      const selected = selectedObjects && selectedObjects.has(v.id)
+      let stroke = 'black'
+      if (v.guide) {
+        stroke = 'lightgray'
+      }
+      if (selected) {
+        stroke = 'red'
+      }
+      svgs.push(<circle key={v.id} cx={p[0]} cy={p[1]} r={3} fill="none" strokeWidth={1} stroke={stroke} />)
+      break
+    }
     }
   }
 
@@ -694,6 +740,7 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
   if (toolState.viewBox.offset[0] <= 0 && toolState.viewBox.offset[0] + toolState.viewBox.width >= 0) {
     svgs.push(
       <line
+        key="x-axis"
         x1={0}
         y1={toolState.viewBox.offset[1] - toolState.viewBox.height}
         x2={0}
@@ -706,6 +753,7 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
   if (toolState.viewBox.offset[1] <= 0 && toolState.viewBox.offset[1] + toolState.viewBox.height >= 0) {
     svgs.push(
       <line
+        key="y-axis"
         x1={toolState.viewBox.offset[0] - toolState.viewBox.width}
         y1={0}
         x2={toolState.viewBox.offset[0] + toolState.viewBox.width * 2}
