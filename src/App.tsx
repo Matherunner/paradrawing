@@ -1,7 +1,7 @@
-import React, { CSSProperties, MouseEventHandler, PropsWithChildren } from 'react';
+import React, { CSSProperties, PropsWithChildren } from 'react';
 import katex from 'katex';
 import styles from './App.module.css';
-import { Button, DataAction, DataState, Drawing, EventKind, ObjectKind, PanStateKind, StateChangeListener, ToolKind } from './canvas';
+import { Button, DataState, Drawing, EventKind, ObjectKind, PanStateKind, StateChangeListener, ToolKind, transformDataToSVG, Vec2D } from './canvas';
 
 function domButtonToCanvasButton(button: number): Button | undefined {
   switch (button) {
@@ -12,113 +12,6 @@ function domButtonToCanvasButton(button: number): Button | undefined {
   case 2:
     return Button.Secondary
   }
-}
-
-function pathCommandsFromObject(object: Object): string {
-  let pathCmds = '';
-  switch (object.type) {
-  case ObjectType.Path:
-    for (let i = 0; i < object.nodes.length; ++i) {
-      const node = object.nodes[i];
-      if (!i) {
-        pathCmds += `M${node.point.x} ${node.point.y}`;
-      } else {
-        pathCmds += `L${node.point.x} ${node.point.y}`;
-      }
-    }
-  }
-  return pathCmds;
-}
-
-interface Vec2D {
-  x: number;
-  y: number;
-}
-
-function vecSub(a: Vec2D, b: Vec2D): Vec2D {
-  return {
-    x: a.x - b.x,
-    y: a.y - b.y,
-  }
-}
-
-function vecDot(a: Vec2D, b: Vec2D): number {
-  return a.x * b.x + a.y * b.y;
-}
-
-type Node = {
-  point: Vec2D;
-  leftControlPoint: number | null;
-  rightControlPoint: number | null;
-}
-
-enum ObjectType {
-  Circle,
-  Path,
-}
-
-type Object = {
-  type: ObjectType.Path;
-  id: number,
-  nodes: Node[];
-} | {
-  type: ObjectType.Circle;
-  id: number,
-  radius: number;
-  centre: Vec2D;
-}
-
-function hitLineSegment(a: Node, b: Node, tol: number, mouse: Vec2D): boolean {
-  const mouseFromA = vecSub(mouse, a.point);
-  const bFromA = vecSub(b.point, a.point);
-  const proj = vecDot(mouseFromA, bFromA);
-  const normSq = vecDot(bFromA, bFromA);
-  if (normSq < 1e-2) {
-    return false;
-  }
-
-  if (proj <= 0 && proj * proj / normSq >= tol * tol) {
-    return false;
-  }
-
-  // Equivalent to if (proj / norm(b - a) >= norm(b - a) + tol)
-  const tmp1 = proj - normSq;
-  if (tmp1 >= 0 && tmp1 * tmp1 / normSq >= tol * tol) {
-    return false;
-  }
-
-  const mouseFromANormSq = vecDot(mouseFromA, mouseFromA);
-  const prepDistSq = mouseFromANormSq - proj * proj / normSq;
-  if (prepDistSq > tol * tol) {
-    return false;
-  }
-
-  return true;
-}
-
-function hoveredObjects(objects: Object[], mouse: Vec2D): Object | undefined {
-  for (const object of objects) {
-    switch (object.type) {
-    case ObjectType.Path:
-      for (let i = 1; i < object.nodes.length; ++i) {
-        const a = object.nodes[i - 1];
-        const b = object.nodes[i];
-        if (hitLineSegment(a, b, 10, mouse)) {
-          // FIXME: always take the first one for now, probably not correct
-          return {
-            type: ObjectType.Path,
-            id: -1,
-            nodes: [a, b],
-          }
-        }
-      }
-
-      break;
-    case ObjectType.Circle:
-      break;
-    }
-  }
-  return undefined;
 }
 
 interface ControllerState {
@@ -215,6 +108,7 @@ function LeftSideBar(props: PropsWithChildren<LeftSideBarProps>) {
 interface RightSideBarProps {
   state: ControllerState,
   drawing: Drawing,
+  dataToSVGCoord?: (p: Vec2D) => Vec2D,
 }
 
 function RightSideBar(props: PropsWithChildren<RightSideBarProps>) {
@@ -308,7 +202,12 @@ function RightSideBar(props: PropsWithChildren<RightSideBarProps>) {
 
           setDownloadURI(url)
         }}>Export as SVG</button>
-        <SVGPreview state={drawingRef.getDataState()} onRender={(e) => previewSVG.current = e} fitToContent />
+        <SVGPreview
+          state={drawingRef.getDataState()}
+          dataToSVGCoord={props.dataToSVGCoord}
+          onRender={(e) => previewSVG.current = e}
+          fitToContent
+        />
         {
           downloadURI ? <a href={downloadURI} download>Download SVG</a> : null
         }
@@ -327,7 +226,11 @@ function SideBars(props: PropsWithChildren<SideBarsProps>) {
   return (
     <div style={{ position: 'relative', ...props.style }}>
       <LeftSideBar state={props.state} />
-      <RightSideBar state={props.state} drawing={props.drawing} />
+      <RightSideBar
+        state={props.state}
+        drawing={props.drawing}
+        dataToSVGCoord={(p) => transformDataToSVG(props.drawing.getToolState(), p)}
+      />
     </div>
   )
 }
@@ -357,6 +260,7 @@ function CommandList(props: PropsWithChildren<CommandListProps>) {
 
 interface SVGPreviewProps {
   state: DataState,
+  dataToSVGCoord?: (point: Vec2D) => Vec2D,
   style?: CSSProperties,
   width?: number,
   height?: number,
@@ -375,6 +279,8 @@ function SVGPreview(props: PropsWithChildren<SVGPreviewProps>) {
   const [svgViewBox, setSVGViewBox] = React.useState<string>()
 
   const svgRef = React.useRef<SVGSVGElement>(null)
+
+  const dataToSVGCoord = props.dataToSVGCoord || (v => v);
 
   React.useEffect(() => {
     if (!props.fitToContent || !svgRef.current) {
@@ -414,7 +320,9 @@ function SVGPreview(props: PropsWithChildren<SVGPreviewProps>) {
           const point1Obj = props.state.objects[lineObj.point1];
           const point2Obj = props.state.objects[lineObj.point2];
           if (point1Obj && point2Obj && point1Obj.kind === ObjectKind.Node && point2Obj.kind === ObjectKind.Node) {
-            svgs.push(<line key={lineID} x1={point1Obj.point[0]} y1={point1Obj.point[1]} x2={point2Obj.point[0]} y2={point2Obj.point[1]} strokeWidth={1} stroke="black" />);
+            const p1 = dataToSVGCoord(point1Obj.point)
+            const p2 = dataToSVGCoord(point2Obj.point)
+            svgs.push(<line key={lineID} x1={p1[0]} y1={p1[1]} x2={p2[0]} y2={p2[1]} strokeWidth={1} stroke="black" />);
           }
         }
       }
@@ -424,11 +332,12 @@ function SVGPreview(props: PropsWithChildren<SVGPreviewProps>) {
     case ObjectKind.Text: {
       const pointObj = props.state.objects[v.point]
       if (pointObj && pointObj.kind === ObjectKind.Node) {
+        const p = dataToSVGCoord(pointObj.point)
         svgs.push(
           <foreignObject
             key={v.id}
-            x={pointObj.point[0]}
-            y={pointObj.point[1]}
+            x={p[0]}
+            y={p[1]}
             width={1}
             height={1}
             overflow="visible"
@@ -668,14 +577,17 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
             const point1Obj = tool.tempObjectMap[lineObj.point1];
             const point2Obj = tool.tempObjectMap[lineObj.point2];
             if (point1Obj && point2Obj && point1Obj.kind === ObjectKind.Node && point2Obj.kind === ObjectKind.Node) {
-              svgs.push(<line key={lineObj.id} x1={point1Obj.point[0]} y1={point1Obj.point[1]} x2={point2Obj.point[0]} y2={point2Obj.point[1]} strokeWidth={1} stroke="blue" />)
+              const p1 = transformDataToSVG(toolState, point1Obj.point)
+              const p2 = transformDataToSVG(toolState, point2Obj.point)
+              svgs.push(<line key={lineObj.id} x1={p1[0]} y1={p1[1]} x2={p2[0]} y2={p2[1]} strokeWidth={1} stroke="blue" />)
             }
           }
         }
         for (const pointObjectID of nextObj.points) {
           const pointObj = tool.tempObjectMap[pointObjectID];
           if (pointObj?.kind === ObjectKind.Node) {
-            svgs.push(<circle key={pointObjectID} cx={pointObj.point[0]} cy={pointObj.point[1]} r={3} fill="none" strokeWidth={1} stroke="blue" />);
+            const p = transformDataToSVG(toolState, pointObj.point)
+            svgs.push(<circle key={pointObjectID} cx={p[0]} cy={p[1]} r={3} fill="none" strokeWidth={1} stroke="blue" />);
           }
         }
         break;
@@ -693,8 +605,9 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
     if (nextObj && nextObj.kind === ObjectKind.Text) {
       const pointObj = tool.tempObjectMap[nextObj.point]
       if (pointObj && pointObj.kind === ObjectKind.Node) {
-        svgs.push(<circle key={pointObj.id} cx={pointObj.point[0]} cy={pointObj.point[1]} r={3} fill="none" strokeWidth={1} stroke="green" />)
-        svgs.push(<text key={nextObj.id} x={pointObj.point[0]} y={pointObj.point[1]}>{nextObj.text}</text>)
+        const p = transformDataToSVG(toolState, pointObj.point)
+        svgs.push(<circle key={pointObj.id} cx={p[0]} cy={p[1]} r={3} fill="none" strokeWidth={1} stroke="green" />)
+        svgs.push(<text key={nextObj.id} x={p[0]} y={p[1]}>{nextObj.text}</text>)
       }
     }
     break;
@@ -724,12 +637,13 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
       for (const pointID of v.points) {
         const pointObj = dataState.objects[pointID];
         if (pointObj && pointObj.kind === ObjectKind.Node) {
+          const p = transformDataToSVG(toolState, pointObj.point)
           const selected = selectedObjects && selectedObjects.has(pointID)
           let stroke = 'black'
           if (selected) {
             stroke = 'red'
           }
-          svgs.push(<circle key={pointID} cx={pointObj.point[0]} cy={pointObj.point[1]} r={3} fill="none" strokeWidth={1} stroke={stroke} />);
+          svgs.push(<circle key={pointID} cx={p[0]} cy={p[1]} r={3} fill="none" strokeWidth={1} stroke={stroke} />);
         }
       }
       for (const lineID of v.lines) {
@@ -738,9 +652,11 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
           const point1Obj = dataState.objects[lineObj.point1];
           const point2Obj = dataState.objects[lineObj.point2];
           if (point1Obj && point2Obj && point1Obj.kind === ObjectKind.Node && point2Obj.kind === ObjectKind.Node) {
+            const p1 = transformDataToSVG(toolState, point1Obj.point)
+            const p2 = transformDataToSVG(toolState, point2Obj.point)
             const selected = selectedObjects && selectedObjects.has(lineID);
             if (selected) {
-              svgs.push(<line key={lineID} x1={point1Obj.point[0]} y1={point1Obj.point[1]} x2={point2Obj.point[0]} y2={point2Obj.point[1]} strokeWidth={2} stroke="red" />);
+              svgs.push(<line key={lineID} x1={p1[0]} y1={p1[1]} x2={p2[0]} y2={p2[1]} strokeWidth={2} stroke="red" />);
             }
           }
         }
@@ -750,12 +666,13 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
     case ObjectKind.Text: {
       const pointObj = dataState.objects[v.point]
       if (pointObj && pointObj.kind === ObjectKind.Node) {
+        const p = transformDataToSVG(toolState, pointObj.point)
         const selected = selectedObjects && selectedObjects.has(pointObj.id)
         let stroke = 'black'
         if (selected) {
           stroke = 'red'
         }
-        svgs.push(<circle key={pointObj.id} cx={pointObj.point[0]} cy={pointObj.point[1]} r={3} fill="none" strokeWidth={1} stroke={stroke} />)
+        svgs.push(<circle key={pointObj.id} cx={p[0]} cy={p[1]} r={3} fill="none" strokeWidth={1} stroke={stroke} />)
       }
       break
     }
@@ -774,6 +691,7 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
     >
       <SVGPreview
         state={dataState}
+        dataToSVGCoord={p => transformDataToSVG(toolState, p)}
         style={{ cursor, }}
         width={containerRef.current?.clientWidth}
         height={containerRef.current?.clientHeight}

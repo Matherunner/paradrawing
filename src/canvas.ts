@@ -322,8 +322,12 @@ export type PanState =
 export interface ToolState {
     tool: Tool,
     history: ActionHistory,
+    // Point in viewport coordinates
     mousePoint: Vec2D,
+    // viewbox attribute for SVG
     viewBox: ViewBox,
+    // Offset to the origin of the data coordinate system
+    dataOrigin: Vec2D,
     scale: number,
     pan: PanState,
 }
@@ -826,6 +830,24 @@ function transformViewportToSVG(state: ToolState, point: Vec2D): Vec2D {
     ]
 }
 
+function transformSVGToData(state: ToolState, point: Vec2D): Vec2D {
+    return [
+        point[0] - state.dataOrigin[0],
+        state.dataOrigin[1] - point[1],
+    ]
+}
+
+function transformViewportToData(state: ToolState, point: Vec2D): Vec2D {
+    return transformSVGToData(state, transformViewportToSVG(state, point))
+}
+
+export function transformDataToSVG(state: ToolState, point: Vec2D): Vec2D {
+    return [
+        point[0] + state.dataOrigin[0],
+        state.dataOrigin[1] - point[1],
+    ]
+}
+
 function executeDataAction(state: DataState, action: Readonly<DataAction>): boolean {
     switch (action.kind) {
     case DataActionKind.AddObject:
@@ -867,7 +889,7 @@ function executeToolAction(toolState: ToolState, action: Readonly<ToolAction>): 
             const nextPoint: CanvasObject = {
                 id: generateID(),
                 kind: ObjectKind.Node,
-                point: transformViewportToSVG(toolState, toolState.mousePoint),
+                point: transformViewportToData(toolState, toolState.mousePoint),
             }
             const nextLine: CanvasObject = {
                 id: generateID(),
@@ -898,7 +920,7 @@ function executeToolAction(toolState: ToolState, action: Readonly<ToolAction>): 
 
             const nextPoint = toolState.tool.tempObjectMap[nextObj.points[nextObj.points.length - 1]];
             if (nextPoint && nextPoint.kind === ObjectKind.Node) {
-                nextPoint.point = transformViewportToSVG(toolState, action.point);
+                nextPoint.point = transformViewportToData(toolState, action.point);
             }
             return true;
 
@@ -922,7 +944,7 @@ function executeToolAction(toolState: ToolState, action: Readonly<ToolAction>): 
             const nextNode: CanvasObject = {
                 id: generateID(),
                 kind: ObjectKind.Node,
-                point: transformViewportToSVG(toolState, toolState.mousePoint),
+                point: transformViewportToData(toolState, toolState.mousePoint),
             }
             const nextPath: CanvasObject = {
                 id: generateID(),
@@ -953,7 +975,7 @@ function executeToolAction(toolState: ToolState, action: Readonly<ToolAction>): 
             const nextNode: CanvasObject = {
                 id: generateID(),
                 kind: ObjectKind.Node,
-                point: transformViewportToSVG(toolState, toolState.mousePoint),
+                point: transformViewportToData(toolState, toolState.mousePoint),
             }
             const nextText: CanvasObject = {
                 id: generateID(),
@@ -1019,7 +1041,7 @@ function executeToolAction(toolState: ToolState, action: Readonly<ToolAction>): 
                 return false
             }
             textObj.text = action.text
-            pointObj.point = transformViewportToSVG(toolState, action.point)
+            pointObj.point = transformViewportToData(toolState, action.point)
             return true
         }
         return false
@@ -1120,7 +1142,7 @@ function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<Data
                     continue
                 }
 
-                const hitPoint = transformViewportToSVG(toolState, event.point)
+                const hitPoint = transformViewportToData(toolState, event.point)
 
                 switch (obj.kind) {
                 case ObjectKind.Node:
@@ -1413,6 +1435,7 @@ export class Drawing {
             width: 0,
             height: 0,
         },
+        dataOrigin: [0, 0],
         scale: 1,
         pan: {
             kind: PanStateKind.Idle
