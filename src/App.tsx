@@ -1,7 +1,7 @@
 import React, { CSSProperties, PropsWithChildren } from 'react';
 import katex from 'katex';
 import styles from './App.module.css';
-import { Button, DataState, Drawing, EventKind, ObjectKind, PanStateKind, StateChangeListener, ToolKind, transformDataToSVG, Vec2D } from './canvas';
+import { Button, DataState, Drawing, EventKind, ObjectKind, PanStateKind, StateChangeListener, ToolKind, transformDataToSVG, transformSVGToData, transformViewportToData, Vec2D } from './canvas';
 
 function domButtonToCanvasButton(button: number): Button | undefined {
   switch (button) {
@@ -71,12 +71,18 @@ function Toolbar(props: PropsWithChildren<ToolbarProps>) {
 
   const height = props.height ?? DEFAULT_TOOLBAR_HEIGHT
 
-  const { viewBox } = props.drawing.getToolState()
+  const toolState = props.drawing.getToolState()
+  const viewBox = toolState.viewBox;
+  const offset = transformSVGToData(toolState, viewBox.offset)
+  offset[1] -= viewBox.height
+
+  const mouse = transformViewportToData(toolState, toolState.mousePoint)
 
   return (
     <div style={{ width: '100%', height, backgroundColor: '#eeeeff', pointerEvents: 'auto' }}>
       <span>{toolboxName}</span>
-      <span> View Box: {viewBox.offset[0]} {viewBox.offset[1]} {viewBox.width} {viewBox.height}</span>
+      <span> View Box: {offset[0]} {offset[1]} {offset[0] + viewBox.width} {offset[1] + viewBox.height}</span>
+      <span> Mouse: {mouse[0]} {mouse[1]}</span>
     </div>
   );
 }
@@ -453,6 +459,11 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
       kind: EventKind.ResizeView,
       viewWidth: clientWidth,
       viewHeight: clientHeight,
+    })
+
+    drawingRef.sendEvent({
+      kind: EventKind.SetViewOffset,
+      offset: [-Math.round(clientWidth / 2), -Math.round(clientHeight / 2)],
     })
   }, [])
 

@@ -53,7 +53,7 @@ export enum EventKind {
 
     ResizeView,
     ScaleView,
-    PanView,
+    SetViewOffset,
 
     AddPerpendicularConstraint,
     AddCoincidentConstraint,
@@ -106,7 +106,7 @@ export type Event =
         scale: number,
     } |
     {
-        kind: EventKind.PanView,
+        kind: EventKind.SetViewOffset,
         offset: Vec2D,
     } |
     {
@@ -144,6 +144,7 @@ export enum ToolActionKind {
     SelectTool,
 
     ResizeView,
+    SetViewOffset,
 
     StartPan,
     StopPan,
@@ -196,6 +197,10 @@ type ToolAction =
         kind: ToolActionKind.ResizeView,
         width: number,
         height: number,
+    } |
+    {
+        kind: ToolActionKind.SetViewOffset,
+        offset: Vec2D,
     } |
     {
         kind: ToolActionKind.StartPan,
@@ -830,14 +835,14 @@ function transformViewportToSVG(state: ToolState, point: Vec2D): Vec2D {
     ]
 }
 
-function transformSVGToData(state: ToolState, point: Vec2D): Vec2D {
+export function transformSVGToData(state: ToolState, point: Vec2D): Vec2D {
     return [
         point[0] - state.dataOrigin[0],
         state.dataOrigin[1] - point[1],
     ]
 }
 
-function transformViewportToData(state: ToolState, point: Vec2D): Vec2D {
+export function transformViewportToData(state: ToolState, point: Vec2D): Vec2D {
     return transformSVGToData(state, transformViewportToSVG(state, point))
 }
 
@@ -1001,6 +1006,11 @@ function executeToolAction(toolState: ToolState, action: Readonly<ToolAction>): 
     case ToolActionKind.ResizeView: {
         toolState.viewBox.width = action.width / toolState.scale
         toolState.viewBox.height = action.height / toolState.scale
+        return true
+    }
+
+    case ToolActionKind.SetViewOffset: {
+        toolState.viewBox.offset = action.offset
         return true
     }
 
@@ -1272,6 +1282,13 @@ function generateAction(toolState: Readonly<ToolState>, dataState: Readonly<Data
             kind: ToolActionKind.ResizeView,
             width: event.viewWidth,
             height: event.viewHeight,
+        })
+        break
+
+    case EventKind.SetViewOffset:
+        toolActions.push({
+            kind: ToolActionKind.SetViewOffset,
+            offset: event.offset,
         })
         break
 
