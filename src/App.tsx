@@ -679,6 +679,32 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
     }
   }
 
+  // Draw x and y axes
+  if (toolState.viewBox.offset[0] <= 0 && toolState.viewBox.offset[0] + toolState.viewBox.width >= 0) {
+    svgs.push(
+      <line
+        x1={0}
+        y1={toolState.viewBox.offset[1] - toolState.viewBox.height}
+        x2={0}
+        y2={toolState.viewBox.offset[1] + toolState.viewBox.height * 2}
+        strokeWidth={1}
+        stroke="lightgray"
+      />
+    )
+  }
+  if (toolState.viewBox.offset[1] <= 0 && toolState.viewBox.offset[1] + toolState.viewBox.height >= 0) {
+    svgs.push(
+      <line
+        x1={toolState.viewBox.offset[0] - toolState.viewBox.width}
+        y1={0}
+        x2={toolState.viewBox.offset[0] + toolState.viewBox.width * 2}
+        y2={0}
+        strokeWidth={1}
+        stroke="lightgray"
+      />
+    )
+  }
+
   const viewBox = `${toolState.viewBox.offset[0]} ${toolState.viewBox.offset[1]} ${toolState.viewBox.width} ${toolState.viewBox.height}`
 
   return (
