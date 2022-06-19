@@ -475,7 +475,7 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
 
     drawingRef.sendEvent({
       kind: EventKind.SetViewOffset,
-      offset: [-Math.round(clientWidth / 2), -Math.round(clientHeight / 2)],
+      offset: [-Math.round(clientWidth / 2.618), -Math.round(clientHeight * 1.618 / 2.618)],
     })
 
     // Create guide origin point
