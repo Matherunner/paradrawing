@@ -1,7 +1,7 @@
 import React, { CSSProperties, PropsWithChildren } from 'react';
 import katex from 'katex';
 import styles from './App.module.css';
-import { Button, DataState, Drawing, EventKind, ObjectID, ObjectKind, ObjectMap, PanStateKind, StateChangeListener, ToolKind, transformDataToSVG, transformSVGToData, transformViewportToData, Vec2D } from './canvas';
+import { Button, DataState, Drawing, EventKind, ObjectID, ObjectKind, ObjectMap, PanStateKind, StateChangeListener, ToolKind, ToolState, transformDataToSVG, transformSVGToData, transformViewportToData, Vec2D } from './canvas';
 
 function domButtonToCanvasButton(button: number): Button | undefined {
   switch (button) {
@@ -87,11 +87,22 @@ function Toolbar(props: PropsWithChildren<ToolbarProps>) {
   );
 }
 
+function serialiseStates(state: ToolState) {
+  const history = state.history
+  const s = JSON.stringify(history)
+  return new Blob([s], { type: 'text/plain' })
+}
+
 interface LeftSideBarProps {
   state: ControllerState,
+  drawing: Drawing,
 }
 
 function LeftSideBar(props: PropsWithChildren<LeftSideBarProps>) {
+  const [saveFileURL, setSaveFileURL] = React.useState('')
+
+  const toolState = props.drawing.getToolState()
+
   return (
     <div
       style={{
@@ -106,6 +117,21 @@ function LeftSideBar(props: PropsWithChildren<LeftSideBarProps>) {
         flexDirection: 'column',
       }}
     >
+      <div>
+        <button onClick={() => {
+          const data = serialiseStates(toolState)
+          const url = URL.createObjectURL(data)
+          setSaveFileURL(url)
+        }}>Save</button>
+        <button onClick={() => {
+          props.drawing.resetTool()
+        }}>Load</button>
+      </div>
+      <div>
+        {saveFileURL ? (
+          <a href={saveFileURL} download>Save File</a>
+        ) : null}
+      </div>
       <CommandList state={props.state} />
     </div>
   )
@@ -231,7 +257,10 @@ interface SideBarsProps {
 function SideBars(props: PropsWithChildren<SideBarsProps>) {
   return (
     <div style={{ position: 'relative', ...props.style }}>
-      <LeftSideBar state={props.state} />
+      <LeftSideBar
+        state={props.state}
+        drawing={props.drawing}
+      />
       <RightSideBar
         state={props.state}
         drawing={props.drawing}

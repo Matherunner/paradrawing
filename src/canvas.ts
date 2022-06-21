@@ -1108,9 +1108,11 @@ function executeToolAction(toolState: ToolState, action: Readonly<ToolAction>): 
         toolState.mousePoint = action.point;
         return true;
 
-    case ToolActionKind.AddHistory:
-        appendHistory(toolState, action.action);
+    case ToolActionKind.AddHistory: {
+        const copy = JSON.parse(JSON.stringify(action.action))
+        appendHistory(toolState, copy);
         return true;
+    }
 
     case ToolActionKind.SelectObject:
         switch (toolState.tool.kind) {
@@ -1506,31 +1508,44 @@ export interface StateChangeEvent {
 export type StateChangeListener = (e: StateChangeEvent) => void;
 
 export class Drawing {
-    private toolState: ToolState = {
-        tool: {
-            kind: ToolKind.Selector,
-            selectedObjects: new Set(),
-        },
-        history: {},
-        mousePoint: [0, 0],
-        viewBox: {
-            offset: [0, 0],
-            width: 0,
-            height: 0,
-        },
-        dataOrigin: [0, 0],
-        scale: 1,
-        pan: {
-            kind: PanStateKind.Idle
-        }
-    };
+    private toolState = this.initialToolState()
 
-    private dataState: DataState = {
-        objects: {},
-        constraints: [],
-    }
+    private dataState = this.initialDataState()
 
     private listeners: Set<StateChangeListener> = new Set();
+
+    private initialToolState(): ToolState {
+        return {
+            tool: {
+                kind: ToolKind.Selector,
+                selectedObjects: new Set(),
+            },
+            history: {},
+            mousePoint: [0, 0],
+            viewBox: {
+                offset: [0, 0],
+                width: 0,
+                height: 0,
+            },
+            dataOrigin: [0, 0],
+            scale: 1,
+            pan: {
+                kind: PanStateKind.Idle
+            }
+        };
+    }
+
+    private initialDataState(): DataState {
+        return {
+            objects: {},
+            constraints: [],
+        }
+    }
+
+    public resetTool() {
+        this.toolState = this.initialToolState()
+        this.notifyListeners()
+    }
 
     public getToolState(): Readonly<ToolState> {
         return this.toolState;
@@ -1546,6 +1561,15 @@ export class Drawing {
 
     public removeStateChangeListener(h: StateChangeListener) {
         this.listeners.delete(h);
+    }
+
+    private notifyListeners() {
+        const changeEv = {
+            state: this.toolState,
+        }
+        this.listeners.forEach((v) => {
+            v(changeEv);
+        })
     }
 
     public sendEvent(event: Event) {
@@ -1569,11 +1593,6 @@ export class Drawing {
             return;
         }
 
-        const changeEv = {
-            state: this.toolState,
-        }
-        this.listeners.forEach((v) => {
-            v(changeEv);
-        })
+        this.notifyListeners()
     }
 }
