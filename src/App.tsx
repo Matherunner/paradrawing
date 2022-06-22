@@ -123,7 +123,7 @@ function LeftSideBar(props: PropsWithChildren<LeftSideBarProps>) {
           const url = URL.createObjectURL(data)
           setSaveFileURL(url)
         }}>Save</button>
-        <button onClick={() => {
+        <button onFocus={(e) => e.target.blur()} onClick={() => {
           props.drawing.resetTool()
         }}>Load</button>
       </div>
