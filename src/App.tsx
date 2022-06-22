@@ -1,7 +1,7 @@
 import React, { CSSProperties, PropsWithChildren } from 'react';
 import katex from 'katex';
 import styles from './App.module.css';
-import { Button, DataState, Drawing, EventKind, ObjectID, ObjectKind, ObjectMap, PanStateKind, StateChangeListener, ToolKind, ToolState, transformDataToSVG, transformSVGToData, transformViewportToData, Vec2D } from './canvas';
+import { ActionHistory, Button, DataState, Drawing, EventKind, ObjectID, ObjectKind, ObjectMap, PanStateKind, StateChangeListener, ToolKind, ToolState, transformDataToSVG, transformSVGToData, transformViewportToData, Vec2D } from './canvas';
 
 function domButtonToCanvasButton(button: number): Button | undefined {
   switch (button) {
@@ -101,6 +101,9 @@ interface LeftSideBarProps {
 function LeftSideBar(props: PropsWithChildren<LeftSideBarProps>) {
   const [saveFileURL, setSaveFileURL] = React.useState('')
 
+
+  const fileRef = React.useRef<HTMLInputElement>(null)
+
   const toolState = props.drawing.getToolState()
 
   return (
@@ -124,8 +127,41 @@ function LeftSideBar(props: PropsWithChildren<LeftSideBarProps>) {
           setSaveFileURL(url)
         }}>Save</button>
         <button onFocus={(e) => e.target.blur()} onClick={() => {
-          props.drawing.resetTool()
+          if (fileRef.current) {
+            fileRef.current.click()
+          }
         }}>Load</button>
+        <input ref={fileRef} type="file" onChange={(e) => {
+          if (!e.target.files || !e.target.files.length) {
+            return
+          }
+
+          const file = e.target.files[0]
+          const fileReader = new FileReader()
+          fileReader.addEventListener('load', (e) => {
+            if (!e.target || typeof e.target.result !== 'string') {
+              return
+            }
+
+            const result = e.target.result
+            const history: ActionHistory = JSON.parse(result)
+
+            console.log(history)
+
+            props.drawing.resetTool()
+
+            let cur = history.root
+            for (;;) {
+              if (cur) {
+                props.drawing.executeDataAction(cur.action)
+                cur = cur.children[0]
+              } else {
+                break
+              }
+            }
+          })
+          fileReader.readAsText(file)
+        }} hidden />
       </div>
       <div>
         {saveFileURL ? (

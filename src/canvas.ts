@@ -260,12 +260,12 @@ type Tool =
         nextObjectID: ObjectID,
     }
 
-interface ActionHistory {
+export interface ActionHistory {
     root?: ActionHistoryNode,
     cur?: ActionHistoryNode,
 }
 
-interface ActionHistoryNode {
+export interface ActionHistoryNode {
     action: DataAction,
     children: ActionHistoryNode[],
 }
@@ -1570,6 +1570,10 @@ export class Drawing {
         this.listeners.forEach((v) => {
             v(changeEv);
         })
+    }
+
+    public executeDataAction(action: DataAction) {
+        executeDataAction(this.dataState, action)
     }
 
     public sendEvent(event: Event) {
