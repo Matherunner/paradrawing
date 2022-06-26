@@ -1572,8 +1572,13 @@ export class Drawing {
         })
     }
 
+    // TODO: temporary function
     public executeDataAction(action: DataAction) {
         executeDataAction(this.dataState, action)
+        executeToolAction(this.toolState, {
+            kind: ToolActionKind.AddHistory,
+            action,
+        })
     }
 
     public sendEvent(event: Event) {
