@@ -181,6 +181,11 @@ function LeftSideBar(props: PropsWithChildren<LeftSideBarProps>) {
               viewWidth: props.state.drawingSize.width,
               viewHeight: props.state.drawingSize.height,
             })
+
+            props.drawing.sendEvent({
+              kind: EventKind.SetViewOffset,
+              offset: [-Math.round(props.state.drawingSize.width / 2.618), -Math.round(props.state.drawingSize.height * 1.618 / 2.618)],
+            })
           })
           fileReader.readAsText(file)
         }} hidden />
