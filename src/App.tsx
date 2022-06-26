@@ -17,16 +17,25 @@ function domButtonToCanvasButton(button: number): Button | undefined {
 interface ControllerState {
   currentToolType: ToolKind;
   commands: string;
+  drawingSize: {
+    width: number,
+    height: number,
+  }
 }
 
 const initialControllerState = {
   currentToolType: ToolKind.Pen,
   commands: '',
+  drawingSize: {
+    width: 0,
+    height: 0,
+  }
 }
 
 type ControllerAction =
   { type: 'selectTool', toolType: ToolKind } |
-  { type: 'updateHistory', actions: string }
+  { type: 'updateHistory', actions: string } |
+  { type: 'resizeDrawing', size: { width: number, height: number } }
 
 function controllerReducer(state: ControllerState, action: ControllerAction): ControllerState {
   switch (action.type) {
@@ -40,6 +49,12 @@ function controllerReducer(state: ControllerState, action: ControllerAction): Co
     return {
       ...state,
       commands: action.actions,
+    }
+
+  case 'resizeDrawing':
+    return {
+      ...state,
+      drawingSize: action.size,
     }
 
   default:
@@ -159,6 +174,13 @@ function LeftSideBar(props: PropsWithChildren<LeftSideBarProps>) {
                 break
               }
             }
+
+            // TODO: need to resize view here
+            props.drawing.sendEvent({
+              kind: EventKind.ResizeView,
+              viewWidth: props.state.drawingSize.width,
+              viewHeight: props.state.drawingSize.height,
+            })
           })
           fileReader.readAsText(file)
         }} hidden />
@@ -518,6 +540,8 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
         viewWidth: clientWidth,
         viewHeight: clientHeight,
       })
+
+      props.dispatch({ type: 'resizeDrawing', size: { width: clientWidth, height: clientHeight } })
     }
     window.addEventListener('resize', listener)
     return () => {
@@ -537,6 +561,8 @@ function DrawingWrapper(props: PropsWithChildren<DrawingWrapperProps>) {
       viewWidth: clientWidth,
       viewHeight: clientHeight,
     })
+
+    props.dispatch({ type: 'resizeDrawing', size: { width: clientWidth, height: clientHeight } })
 
     drawingRef.sendEvent({
       kind: EventKind.SetViewOffset,
